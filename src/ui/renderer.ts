@@ -149,6 +149,7 @@ export interface OverlayState {
   toolColor: string;
   selected: Species | null;
   showLabels: boolean;
+  place?: { cell: number; radius: number } | null;
 }
 
 /** Paints the world: a detailed base map from the simulation grid, plus a live overlay. */
@@ -724,6 +725,21 @@ export class MapRenderer {
     }
     if (this.effectStart.size > 200) this.effectStart.clear();
 
+    // the inspected place
+    if (st.place) {
+      const px = sx((st.place.cell % W) + 0.5);
+      const py = sy(Math.floor(st.place.cell / W) + 0.5);
+      ctx.lineWidth = 2 * dpr;
+      ctx.setLineDash([6 * dpr, 4 * dpr]);
+      ctx.lineDashOffset = -now / 60;
+      ctx.strokeStyle = 'rgba(79, 209, 197, 0.95)';
+      ctx.beginPath();
+      if (st.place.radius) ctx.ellipse(px, py, (st.place.radius + 0.5) * k, (st.place.radius + 0.5) * ky, 0, 0, Math.PI * 2);
+      else ctx.rect(px - k / 2, py - ky / 2, k, ky);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     // cursor
     if (st.hover >= 0) {
       const hx = st.hover % W;
@@ -916,9 +932,36 @@ export class MapRenderer {
             if (wet(x + u, y + v)) continue;
             trees.push([(x + u - x0) * k, (y + v - y0) * ky, k * (0.5 + 0.18 * can) * (0.85 + 0.3 * hash(c, i * 3 + 3)), icon]);
           }
-        } else if (cov > 0.12) {
+        }
+        if (cov > 0.1 && can < 0.6) {
           const herb = dominant(low, base, false);
-          if (herb && FLAT.has(herb.icon)) specks(herb, pop[base + herb.slot], c, x, y, 10, dotR * 1.6, false);
+          if (herb?.icon === '🌾') {
+            // a meadow: blades of grass swaying in the wind, green where it rains and straw where it is dry
+            const dry = Math.min(1, Math.max(0, (0.6 - w.moist[c]) / 0.4));
+            const r = Math.round(110 + 95 * dry);
+            const gg = Math.round(175 - 10 * dry);
+            const b = Math.round(70 + 20 * dry);
+            ctx.strokeStyle = `rgb(${r},${gg},${b})`;
+            ctx.lineWidth = Math.max(1, k * 0.013);
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            const blades = Math.max(5, Math.round(cov * 34 * dens));
+            for (let j = 0; j < blades; j++) {
+              const u = 0.05 + 0.9 * hash(c, j * 2 + 200);
+              const v = 0.1 + 0.85 * hash(c, j * 2 + 201);
+              if (wet(x + u, y + v)) continue;
+              const px = (x + u - x0) * k;
+              const py = (y + v - y0) * ky;
+              const len = k * (0.07 + 0.06 * hash(c, j + 300));
+              const sway = Math.sin(t * 1.7 + u * 7 + y * 0.9) * len * 0.4;
+              ctx.moveTo(px, py);
+              ctx.quadraticCurveTo(px + sway * 0.2, py - len * 0.6, px + sway, py - len);
+            }
+            ctx.stroke();
+            if (dens > 0.45 && hash(c, 210) < 0.6 && !wet(x + 0.6, y + 0.55)) {
+              trees.push([(x + 0.25 + 0.5 * hash(c, 211) - x0) * k, (y + 0.3 + 0.5 * hash(c, 212) - y0) * ky, k * 0.26, '🌾']);
+            }
+          } else if (herb && FLAT.has(herb.icon)) specks(herb, pop[base + herb.slot], c, x, y, 10, dotR * 1.6, false);
           else {
             const icon = herb?.icon ?? '🌱';
             const n = cov > 0.5 && dens > 0.4 ? 2 : 1;

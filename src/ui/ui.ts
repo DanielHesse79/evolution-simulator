@@ -4,6 +4,7 @@ import { GOALS, MAXS, MAX_ENERGY, Sim, TOTAL_TICKS, yearAt, type AtmKey, type Go
 import type { Genome } from '../sim/genome';
 import type { Species } from '../sim/species';
 import { CELL_EXAMPLES, buildCell } from './cell';
+import { portrait } from './portrait';
 import { tutorialSeen } from './tutorial';
 import { N } from '../sim/world';
 import { LAYERS, type Layer, type MapRenderer } from './renderer';
@@ -25,7 +26,11 @@ export interface Game {
   setLayer(l: Layer): void;
   start(seed: number, goal: GoalId, tutorial: boolean): void;
   startTutorial(): void;
-  focus(cell: number): void;
+  focus(cell: number, zoom?: number): void;
+  /** The place being inspected on the map, and how far around it to look. */
+  place: { cell: number; radius: number } | null;
+  setPlace(cell: number | null, radius?: number): void;
+  goTo(zoom: number): void;
   markDirty(): void;
 }
 
@@ -147,6 +152,12 @@ export class UI {
     $('detail').addEventListener('pointerdown', (e) => this.onDetailClick(e));
 
     $('btn-tree').addEventListener('click', () => this.showTree());
+    $('btn-guide').addEventListener('click', () => this.showGuide());
+    $('site').addEventListener('pointerdown', (e) => this.onSiteClick(e));
+    $('zoomlevels').addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-level]');
+      if (b && g.sim) g.goTo(Number(b.dataset.level));
+    });
     $('btn-help').addEventListener('click', () => this.showHelp());
     $('btn-new').addEventListener('click', () => this.showStart());
     $('modal').addEventListener('pointerdown', (e) => {
@@ -210,6 +221,12 @@ export class UI {
     this.renderWorld();
     this.renderList();
     this.renderDetail();
+    this.renderSite();
+    const z = g.renderer.zoom;
+    const level = z < 2 ? 1 : z < 4.5 ? 3 : z < 8.5 ? 6 : 11;
+    $('zoomlevels')
+      .querySelectorAll<HTMLElement>('[data-level]')
+      .forEach((b) => b.classList.toggle('on', Number(b.dataset.level) === level));
     this.renderLog();
   }
 
@@ -278,7 +295,7 @@ export class UI {
         if (sim.plagues.some((p) => p.speciesId === sp.id)) badge += '<span class="badge">🦠</span>';
         if (sim.tick - sp.bornTick < 60 && sp.id > 0) badge += '<span class="badge" style="color:var(--teal)">new</span>';
         html += `<div class="sp${sp.id === g.selectedId ? ' on' : ''}" data-id="${sp.id}">
-          <span class="ico">${sp.icon}</span>
+          <img class="thumb" src="${this.picture(sp)}" alt="" />
           <span class="nm"><i>${sp.name}${badge}</i><small>${sp.desc}</small></span>
           <span class="bar"><span style="width:${width}%;background:rgb(${sp.color.join(',')})"></span></span>
         </div>`;
@@ -358,7 +375,7 @@ export class UI {
 
     el.innerHTML = `
       <div class="d-head">
-        <span class="d-ico">${sp.icon}</span>
+        <img class="d-portrait" src="${this.picture(sp)}" alt="Picture of ${sp.name}" data-act="guide" title="Open the field guide" />
         <div><h3>${sp.name}</h3><div class="d-desc">${sp.desc}</div></div>
         <button class="x" data-act="close" title="Deselect">×</button>
       </div>
@@ -399,6 +416,7 @@ export class UI {
     const act = t.closest<HTMLElement>('[data-act]')?.dataset.act;
     if (!act) return;
     if (act === 'close') g.select(-1);
+    else if (act === 'guide') this.showGuide();
     else if (act === 'cell' && sp) {
       this.showCell(sp.genome, sp.name, sp.desc, sp.id);
       return;
@@ -604,6 +622,203 @@ export class UI {
       const ex = CELL_EXAMPLES[0];
       this.showCell(ex.genome, ex.name, ex.desc, 1);
     });
+  }
+
+  // -------------------------------------------------------------------------
+  // Pictures
+  // -------------------------------------------------------------------------
+
+  private pictures = new Map<number, { key: string; url: string }>();
+
+  /** The species' portrait as an image URL, redrawn only when its body actually changes. */
+  picture(sp: Species): string {
+    const g = sp.genome;
+    const r = (v: number, k = 10) => Math.round(v * k);
+    const key = [sp.desc, g.tier, g.diet, g.habitat, r(g.size, 2), r(g.tempOpt, 0.2), r(g.moistOpt), r(g.horns), r(g.armor), r(g.speed), r(g.grasp), r(g.fur), r(g.flight), r(g.social), r(g.intel), r(g.toxin)].join('|');
+    const hit = this.pictures.get(sp.id);
+    if (hit && hit.key === key) return hit.url;
+    const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(portrait(g, sp.hue, sp.id + 1))}`;
+    this.pictures.set(sp.id, { key, url });
+    return url;
+  }
+
+  // -------------------------------------------------------------------------
+  // The place inspector
+  // -------------------------------------------------------------------------
+
+  private renderSite(): void {
+    const g = this.game;
+    const el = $('site');
+    const pl = g.place;
+    if (!pl || !g.sim) {
+      el.style.display = 'none';
+      return;
+    }
+    const sim = g.sim;
+    const w = sim.world;
+    const cells: number[] = [];
+    sim.forRadius(pl.cell, pl.radius ? pl.radius + 0.5 : 0, (c) => cells.push(c));
+    const tot = new Map<Species, number>();
+    const biomes = new Map<string, number>();
+    let t = 0;
+    let ph = 0;
+    let min = 0;
+    let rain = 0;
+    let land = 0;
+    let forest = 0;
+    let grass = 0;
+    for (const c of cells) {
+      for (const sp of sim.alive) {
+        const p = sim.pop[c * MAXS + sp.slot];
+        if (p > 0.05) tot.set(sp, (tot.get(sp) ?? 0) + p);
+      }
+      const b = w.biomeName(c);
+      biomes.set(b, (biomes.get(b) ?? 0) + 1);
+      t += w.temp[c];
+      ph += w.ph[c];
+      min += w.minerals[c];
+      if (!w.isWater[c]) {
+        land++;
+        rain += w.moist[c];
+        forest += w.canopy[c];
+        grass += w.cover[c];
+      }
+    }
+    const n = cells.length;
+    const biome = [...biomes.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    const y = Math.floor(pl.cell / 160);
+    const lat = (0.5 - (y + 0.5) / 90) * 180;
+    const where = w.isWater[pl.cell] ? 'Open sea' : w.continentName(pl.cell);
+    const km = pl.radius ? (pl.radius * 2 + 1) * 250 : 250;
+
+    const groups: [string, Species[]][] = [
+      ['Animals', [...tot.keys()].filter((sp) => sp.kind === 'animal')],
+      ['Plants', [...tot.keys()].filter((sp) => sp.kind === 'plant')],
+      ['Microbes', [...tot.keys()].filter((sp) => sp.kind === 'microbe')],
+    ];
+    let list = '';
+    for (const [title, sps] of groups) {
+      if (!sps.length) continue;
+      sps.sort((a, b) => tot.get(b)! - tot.get(a)!);
+      const max = Math.log10(1 + tot.get(sps[0])!);
+      list += `<div class="site-head">${title} · ${sps.length}</div>`;
+      for (const sp of sps) {
+        const p = tot.get(sp)!;
+        list += `<div class="site-sp${sp.id === g.selectedId ? ' on' : ''}" data-sp="${sp.id}">
+          <img src="${this.picture(sp)}" alt="" />
+          <span class="nm"><i>${sp.name}</i><small>${sp.desc} · ${formatHeadcount(p, sp.genome.size)}</small></span>
+          <span class="bar"><span style="width:${Math.max(6, (Math.log10(1 + p) / max) * 100)}%;background:rgb(${sp.color.join(',')})"></span></span>
+        </div>`;
+      }
+    }
+    if (!list) list = '<div class="site-empty">Nothing lives here. Yet.</div>';
+
+    const facts: [string, string][] = [
+      ['🌡️', `${(t / n).toFixed(1)} °C`],
+      ['🧪', `pH ${(ph / n).toFixed(1)}`],
+      ['💎', `${Math.round((min / n) * 100)} % minerals`],
+    ];
+    if (land) {
+      facts.push(['💧', `${Math.round((rain / land) * 100)} % rain`]);
+      facts.push(['🌳', `${Math.round((forest / land) * 100)} % forest`]);
+      facts.push(['🌾', `${Math.round((grass / land) * 100)} % grass & herbs`]);
+    }
+    if (land < n) facts.push(['🌊', `${Math.round(((n - land) / n) * 100)} % water`]);
+
+    const old = el.querySelector('.site-list');
+    const scroll = old ? old.scrollTop : 0;
+    el.style.display = 'flex';
+    el.innerHTML = `
+      <div class="site-top">
+        <div><h4>${biome}</h4><div class="sub">${where} · ${Math.abs(lat).toFixed(0)}°${lat >= 0 ? 'N' : 'S'} · about ${km.toLocaleString('en-US')} km across</div></div>
+        <button class="x" data-site="close" title="Close (Esc)">×</button>
+      </div>
+      <div class="site-scope">${[
+        [0, 'Spot'],
+        [3, 'Area'],
+        [8, 'Region'],
+      ]
+        .map(([r, name]) => `<button data-scope="${r}" class="${pl.radius === r ? 'on' : ''}">${name}</button>`)
+        .join('')}</div>
+      <div class="site-facts">${facts.map(([i, v]) => `<span>${i} ${v}</span>`).join('')}</div>
+      <div class="site-go"><button data-go="6">🌳 Walk the landscape</button><button data-go="11">🔎 Up close</button></div>
+      <div class="site-list">${list}</div>`;
+    const nl = el.querySelector('.site-list');
+    if (nl) nl.scrollTop = scroll;
+  }
+
+  private onSiteClick(e: PointerEvent): void {
+    const g = this.game;
+    const t = e.target as HTMLElement;
+    const pl = g.place;
+    if (!pl) return;
+    if (t.closest('[data-site="close"]')) g.setPlace(null);
+    else if (t.closest<HTMLElement>('[data-scope]')) g.setPlace(pl.cell, Number(t.closest<HTMLElement>('[data-scope]')!.dataset.scope));
+    else if (t.closest<HTMLElement>('[data-go]')) g.focus(pl.cell, Number(t.closest<HTMLElement>('[data-go]')!.dataset.go));
+    else if (t.closest<HTMLElement>('[data-sp]')) g.select(Number(t.closest<HTMLElement>('[data-sp]')!.dataset.sp));
+    else return;
+    this.refresh(performance.now(), true);
+  }
+
+  // -------------------------------------------------------------------------
+  // The field guide
+  // -------------------------------------------------------------------------
+
+  showGuide(): void {
+    const g = this.game;
+    let tab: Kind | 'extinct' = 'animal';
+    const m = this.openModal(
+      `<div class="card wide">
+        <div class="tree-head"><h2>📖 Field guide</h2><span>Every species is drawn from its genes: its body plan, its traits and its home.</span><button class="secondary" id="close">Close</button></div>
+        <div class="guide-tabs"></div>
+        <div class="guide-grid"></div>
+      </div>`,
+      true,
+    );
+    const draw = () => {
+      const sim = g.sim;
+      const pool = tab === 'extinct' ? sim.species.filter((sp) => !sp.alive && sp.established) : sim.alive.filter((sp) => sp.kind === tab);
+      const counts = { animal: 0, plant: 0, microbe: 0 };
+      for (const sp of sim.alive) counts[sp.kind]++;
+      const extinct = sim.species.filter((sp) => !sp.alive && sp.established).length;
+      m.querySelector('.guide-tabs')!.innerHTML = (
+        [
+          ['animal', `Animals · ${counts.animal}`],
+          ['plant', `Plants · ${counts.plant}`],
+          ['microbe', `Microbes · ${counts.microbe}`],
+          ['extinct', `Extinct · ${extinct}`],
+        ] as [string, string][]
+      )
+        .map(([id, name]) => `<button data-gtab="${id}" class="${tab === id ? 'on' : ''}">${name}</button>`)
+        .join('');
+      const sorted = pool.sort((a, b) => (tab === 'extinct' ? b.diedTick - a.diedTick : b.totalPop - a.totalPop)).slice(0, 120);
+      m.querySelector('.guide-grid')!.innerHTML =
+        sorted
+          .map(
+            (sp) => `<button class="gcard${sp.id === g.selectedId ? ' on' : ''}" data-gsp="${sp.id}">
+              <img src="${this.picture(sp)}" alt="" />
+              <i>${sp.name}</i><span>${sp.desc}</span>
+              <small>${sp.alive ? `${formatHeadcount(sp.totalPop, sp.genome.size)} · ${formatMass(sp.genome.size)}` : `year ${num(sp.bornYear)} – ${num(sp.diedYear)}`}</small>
+            </button>`,
+          )
+          .join('') || '<div class="site-empty">None.</div>';
+    };
+    draw();
+    m.addEventListener('click', (e) => {
+      const t = e.target as HTMLElement;
+      const tb = t.closest<HTMLElement>('[data-gtab]');
+      if (tb) {
+        tab = tb.dataset.gtab as Kind | 'extinct';
+        draw();
+        return;
+      }
+      const card = t.closest<HTMLElement>('[data-gsp]');
+      if (card) {
+        g.select(Number(card.dataset.gsp));
+        this.forceClose();
+      }
+    });
+    m.querySelector('#close')!.addEventListener('click', () => this.forceClose());
   }
 
   /** A drawing of how we imagine this species' cells, with its parts and the cell types of its body. */

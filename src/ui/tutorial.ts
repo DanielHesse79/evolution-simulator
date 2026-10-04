@@ -29,7 +29,7 @@ const STEPS: Step[] = [
   {
     target: ['#mapwrap'],
     title: 'Take a closer look',
-    text: 'Scroll the mouse wheel over the map, or press ＋, to zoom in. Drag to move around. Up close you see the waves, drifting algae, kelp, forests, volcanoes and the creatures themselves.',
+    text: 'Scroll the mouse wheel over the map, or use the World / Region / Landscape / Close-up buttons at its foot. Drag to move around. Up close you see the waves, drifting algae, kelp, forests, volcanoes and the creatures themselves.',
     wait: (c) => c.zoom() >= 3,
     waitText: 'Zoom in to about ×3',
   },
@@ -41,7 +41,7 @@ const STEPS: Step[] = [
   {
     target: ['#species-panel'],
     title: 'Every living species',
-    text: 'Animals, plants and microbes, with a bar for how many there are. Click one to study it. You can also click a creature on the map.',
+    text: 'Animals, plants and microbes, each with its own picture and a bar for how many there are. Click one to study it. Clicking a place on the map opens a list of everything that lives there.',
     wait: (c) => c.selectedId() >= 0,
     waitText: 'Select a species',
   },

@@ -185,7 +185,8 @@ export function habFactors(g: Genome): [number, number, number, number] {
 /** Effect of the air on a species: oxygen for big active bodies, ozone for land life. */
 export function o2Factor(g: Genome, o2: number, co2: number): number {
   const hetero = !isAuto(g);
-  const need = TIER_O2[g.tier] + (hetero ? 0.5 * g.size : 0);
+  // plants make their own oxygen; only animals and other eaters need ever more of it as they grow
+  const need = hetero ? TIER_O2[g.tier] + 0.5 * g.size : TIER_O2[Math.min(g.tier, 2)];
   let f = 1;
   if (need > 0 && o2 < need) f = (o2 / need) * (o2 / need);
   if (g.habitat !== 'aquatic' && o2 < LAND_O2) f *= Math.pow(o2 / LAND_O2, 1.5);

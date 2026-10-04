@@ -632,6 +632,8 @@ export class Sim {
         const g = this.slots[s]!.genome;
         let radius = 0;
         if (g.flight > 0.3) radius = 2 + 6 * g.flight;
+        // seeds of flowering plants ride the wind and the guts of animals
+        else if (g.tier >= 4 && g.habitat !== 'aquatic' && this.slots[s]!.derived.auto && this.rng.chance(0.25)) radius = 4;
         else if (g.habitat !== 'aquatic' && w.distCoast[c] <= 1 && this.rng.chance(0.03)) radius = 4;
         else if (g.habitat === 'aquatic' && this.rng.chance(0.01)) radius = 3;
         if (radius <= 0) continue;
@@ -1495,8 +1497,10 @@ function sameGrowthForm(a: Species, b: Species): boolean {
   return (a.genome.habitat === 'aquatic') === (b.genome.habitat === 'aquatic') && (a.derived.tall > 0.3) === (b.derived.tall > 0.3);
 }
 
+/** Species that compete for the same living. Trees and the grass beneath them are different trades. */
 function guildKey(g: Genome): string {
-  return `${g.tier}|${g.diet}|${g.habitat}`;
+  const form = isAuto(g) ? (g.size > 4.95 ? '|tall' : '|low') : '';
+  return `${g.tier}|${g.diet}|${g.habitat}${form}`;
 }
 
 function cap(s: string): string {

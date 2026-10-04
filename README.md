@@ -26,6 +26,11 @@ Then open http://localhost:5173. `npm run build` produces a static site in `dist
 - **Zoom in**: scroll over the map (or `+` / `−`, or the buttons in its corner) and drag to pan. Up
   close the map shows waves, drifting algae, kelp, forests, mountains, fires, volcanoes and the
   animals themselves. `0` shows the whole world; **📍 Locate** flies to a species.
+- **Inspect a place**: click the map to open the place inspector: the climate there and every
+  species living in a spot, an area or a whole region around it, each with its picture. The
+  **World / Region / Landscape / Close-up** buttons at the foot of the map fly there step by step.
+- **Pictures**: every species gets a portrait generated from its genes (body plan, horns, fur,
+  armour, wings, warning colours, company), shown in the lists and in the **📖 Field guide**.
 - **Cells**: **🔬 Cell** on any species draws how we imagine its cells are built (prokaryote, plant
   or animal cell, organelles labelled) and lists the cell types its body is made of. The help screen
   has textbook cells to compare with.
@@ -68,7 +73,12 @@ cools the planet, so a blooming biosphere can tip the world into an ice age.
 | `src/sim/powers.ts` | The player's divine powers |
 | `src/ui/renderer.ts` | Map painting, zoom/pan and the close-up landscape |
 | `src/ui/cell.ts` | Generated cell drawings and cell-type descriptions |
+| `src/ui/portrait.ts` | Generated portraits of every species |
 | `src/ui/tutorial.ts` | The guided tour |
 | `src/ui/` (rest) | Panels, tree of life |
 | `scripts/headless.ts` | Run a world without the UI (`npm run sim -- <seed> <steps>`) for balancing |
 | `scripts/survey.ts` | Milestone timing across several seeds |
+| `scripts/biomes.ts` | Share of each landscape type and ground plant after a full run |
+
+Play it online: https://danielhesse79.github.io/evolution-simulator/ (deployed from `main` by
+GitHub Actions).

@@ -29,12 +29,12 @@ class App implements Game {
   private lastBase = 0;
   private hover = -1;
   private endShown = false;
-  private lastInspect = { cell: -1, index: 0 };
   private lastTooltip = 0;
   private pointer = { x: 0, y: 0, inside: false };
   /** A press on the map: it becomes a drag (pan) once the pointer moves far enough, otherwise a click. */
   private drag: { x: number; y: number; lastX: number; lastY: number; moved: boolean; button: number } | null = null;
   tutorial: Tutorial;
+  place: { cell: number; radius: number } | null = null;
 
   constructor() {
     this.ui = new UI(this);
@@ -62,6 +62,7 @@ class App implements Game {
     this.acc = 0;
     this.endShown = false;
     this.dirty = true;
+    this.place = null;
     this.ui.reset();
     this.ui.setLegend(this.renderer.layer);
     this.fitMap();
@@ -75,10 +76,28 @@ class App implements Game {
   }
 
   /** Fly the view to a place and zoom in close enough to see the creatures. */
-  focus(cell: number): void {
+  focus(cell: number, zoom?: number): void {
     if (cell < 0) return;
-    this.renderer.flyTo(cell, Math.max(this.renderer.zoom, 6));
+    this.renderer.flyTo(cell, zoom ?? Math.max(this.renderer.zoom, 6));
     this.sim.addEffect('spark', cell, 2);
+  }
+
+  /** Inspect a place on the map: what lives there, and in how wide a circle around it. */
+  setPlace(cell: number | null, radius?: number): void {
+    if (cell === null || cell < 0) this.place = null;
+    else this.place = { cell, radius: radius ?? this.place?.radius ?? 3 };
+    this.ui.refresh(performance.now(), true);
+  }
+
+  /** Step to one of the fixed zoom levels, centred on the inspected place if there is one. */
+  goTo(zoom: number): void {
+    if (zoom <= 1) {
+      this.renderer.resetView();
+      return;
+    }
+    const r = this.renderer;
+    const centre = Math.floor(r.cy) * W + Math.floor(r.cx);
+    r.flyTo(this.place?.cell ?? centre, zoom);
   }
 
   select(id: number): void {
@@ -142,7 +161,8 @@ class App implements Game {
       if ((e.target as HTMLElement).tagName === 'INPUT') return;
       if (e.key === 'Escape') {
         if (this.ui.modalOpen) this.ui.closeModal();
-        else if (this.sim) this.setTool('inspect');
+        else if (this.sim && this.tool !== 'inspect') this.setTool('inspect');
+        else if (this.sim) this.setPlace(null);
         return;
       }
       if (!this.sim || this.ui.modalOpen) return;
@@ -249,18 +269,9 @@ class App implements Game {
     this.ui.refresh(performance.now(), true);
   }
 
-  /** Clicking a place selects what lives there; clicking again steps through its inhabitants. */
+  /** Clicking a place opens the place inspector: everything that lives there. */
   private inspect(cell: number): void {
-    const here = this.sim.speciesAt(cell);
-    if (!here.length) {
-      this.select(-1);
-      return;
-    }
-    const rank = { animal: 0, plant: 1, microbe: 2 };
-    here.sort((a, b) => rank[a.sp.kind] - rank[b.sp.kind] || b.pop - a.pop);
-    if (this.lastInspect.cell === cell) this.lastInspect.index = (this.lastInspect.index + 1) % here.length;
-    else this.lastInspect = { cell, index: 0 };
-    this.select(here[this.lastInspect.index].sp.id);
+    this.setPlace(cell);
   }
 
   private updateTooltip(): void {
@@ -333,6 +344,7 @@ class App implements Game {
         toolRadius: info.radius,
         toolColor: DESTRUCTIVE.includes(this.tool) ? 'rgba(239, 100, 97, 0.95)' : 'rgba(242, 193, 78, 0.95)',
         selected: sim.species[this.selectedId] ?? null,
+        place: this.place,
         showLabels: true,
       });
       this.ui.refresh(now);

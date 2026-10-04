@@ -10,7 +10,7 @@ for (const seed of seeds) {
   let atCap = 0;
   for (let i = 0; i < TOTAL_TICKS; i++) {
     sim.step();
-    if (sim.nAlive >= 178) atCap++;
+    if (sim.nAlive >= 248) atCap++;
   }
   const ms = (performance.now() - t0) / TOTAL_TICKS;
   const dead = sim.species.filter((s) => !s.alive && s.established);

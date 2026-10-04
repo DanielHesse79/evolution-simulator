@@ -19,9 +19,9 @@ import {
 } from './genome';
 import { D_CHEMO, D_PHOTO, Species, derive, type Diagnosis, tierBonusOf, hslToRgb, pairAccess, pairAlpha, pairEdible } from './species';
 
-export const MAXS = 200; // population slots (hard cap on living species)
-export const SOFT_CAP = 150; // above this, only major innovations found new species
-export const HARD_CAP = 180; // above this, a newcomer may push out a faltering, redundant species
+export const MAXS = 260; // population slots (hard cap on living species)
+export const SOFT_CAP = 210; // above this, only major innovations found new species
+export const HARD_CAP = 250; // above this, a newcomer may push out a faltering, redundant species
 /** Steps a new species is left alone before it can be made to give way to another. */
 export const GRACE = 200;
 /** Established land animal species it takes, once animals with backbones exist, for the seas to settle (no new sea animals or microbes). */

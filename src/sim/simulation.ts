@@ -19,9 +19,13 @@ import {
 } from './genome';
 import { D_CHEMO, D_PHOTO, Species, derive, type Diagnosis, tierBonusOf, hslToRgb, pairAccess, pairAlpha, pairEdible } from './species';
 
-export const MAXS = 96; // population slots (hard cap on living species)
-export const SOFT_CAP = 64; // above this, only major innovations found new species
-export const HARD_CAP = 84; // above this, a newcomer has to push the most marginal species out
+export const MAXS = 200; // population slots (hard cap on living species)
+export const SOFT_CAP = 150; // above this, only major innovations found new species
+export const HARD_CAP = 180; // above this, a newcomer may push out a faltering, redundant species
+/** Steps a new species is left alone before it can be made to give way to another. */
+export const GRACE = 200;
+/** Established land animal species it takes, once animals with backbones exist, for the seas to settle (no new sea animals or microbes). */
+export const SEA_SETTLES_AT = 12;
 export const KSCALE = 1000;
 export const MINP = 0.02;
 export const MAINT = 0.08;
@@ -256,6 +260,8 @@ export class Sim {
   private nextEffect = 1;
   private nextPlague = 1;
   climateDirty = true;
+  /** Once land life has taken over, the seas and the microbes stop bringing forth new species. */
+  seaSettled = false;
 
   constructor(seed: number, goal: GoalId, difficulty: DifficultyId = 'normal') {
     this.diff = DIFFICULTIES.find((d) => d.id === difficulty) ?? DIFFICULTIES[1];
@@ -882,15 +888,36 @@ export class Sim {
   }
 
   private speciate(): void {
+    if (!this.seaSettled) {
+      let land = 0;
+      for (const sp of this.alive) if (sp.kind === 'animal' && sp.established && sp.genome.habitat !== 'aquatic' && sp.genome.tier >= 3) land++;
+      if (land >= SEA_SETTLES_AT && this.milestones.has('advanced')) {
+        this.seaSettled = true;
+        this.log('🌊', 'Life has conquered the land. The seas settle: their animals and the microbes live on, but bring forth no new species.', { major: true });
+      }
+    }
     const crowd = Math.max(0, 1 - this.nAlive / SOFT_CAP);
     const lonely = 1 + 6 / (this.nAlive + 1);
     for (const sp of this.alive.slice()) {
       if (sp.cells < 3) continue;
+      if (this.seaSettled && (sp.kind === 'microbe' || (sp.kind === 'animal' && sp.genome.habitat === 'aquatic'))) continue;
       let p = 0.02 * (0.4 + Math.min(1.6, sp.cells / 400)) * lonely;
       if (sp.genome.tier <= 1 || sp.kind === 'animal') p *= 1.5;
       if (sp.mutagen > 0) p *= 5;
       if (this.rng.chance(p)) this.trySpeciate(sp, { crowd });
     }
+  }
+
+/**
+   * May this species be made to give way to a newcomer? Never while it is young, growing, under
+   * God's protection, made by God, or the only mind in the world.
+   */
+  private cullable(o: Species): boolean {
+    if (!o.established || o.sentient || o.playerMade || o.shelterUntil > this.tick) return false;
+    if (this.tick - o.bornTick < GRACE) return false;
+    const h = o.history;
+    if (h.length >= 4 && h[h.length - 1] > h[h.length - 4] * 1.05) return false;
+    return true;
   }
 
   /** Local fitness of a genome at a cell, computed directly (used outside the hot loop). */
@@ -994,6 +1021,7 @@ export class Sim {
       child = res.g;
       major = res.major;
       if (habFactors(child)[w.cls[target]] <= 0.02) return null;
+      if (this.seaSettled && child.habitat === 'aquatic' && !isAuto(child)) return null;
       // natural selection: the mutant must be able to grow from rarity in the living community
       const com = this.community(target);
       const gChild = this.invasionRate(child, target, com, parent);
@@ -1024,18 +1052,23 @@ export class Sim {
       const members = this.alive.filter((o) => guildKey(o.genome) === key);
       if (members.length >= (child.tier <= 1 ? 2 : 4)) {
         let weakest: Species | null = null;
-        for (const o of members) if (o !== parent && o.established && !o.playerMade && (!weakest || o.totalPop < weakest.totalPop)) weakest = o;
+        for (const o of members) if (o !== parent && this.cullable(o) && (!weakest || o.totalPop < weakest.totalPop)) weakest = o;
         if (!weakest || weakest.totalPop > 0.05 * parent.totalPop) return null;
         this.extinct(weakest, `it was crowded out of its niche by a new offshoot of ${parent.name}, which lives the same way`);
       } else if (this.nAlive >= HARD_CAP) {
-        // the world is full: the most marginal species of a crowded niche makes way
-        const counts = new Map<string, number>();
-        for (const o of this.alive) counts.set(guildKey(o.genome), (counts.get(guildKey(o.genome)) ?? 0) + 1);
+        // the world is full: a faltering species that a much larger relative already covers makes way.
+        // If there is none, the newcomer simply does not arise.
+        const biggest = new Map<string, number>();
+        for (const o of this.alive) {
+          const k = guildKey(o.genome);
+          biggest.set(k, Math.max(biggest.get(k) ?? 0, o.totalPop));
+        }
         let weakest: Species | null = null;
         let worst = Infinity;
         for (const o of this.alive) {
-          if (o === parent || !o.established || o.sentient || o.playerMade || (counts.get(guildKey(o.genome)) ?? 0) < 2) continue;
-          const ratio = o.totalPop / viablePop(o);
+          if (o === parent || !this.cullable(o)) continue;
+          const ratio = o.totalPop / (biggest.get(guildKey(o.genome)) ?? 0);
+          if (ratio > 0.1) continue;
           if (ratio < worst) {
             worst = ratio;
             weakest = o;

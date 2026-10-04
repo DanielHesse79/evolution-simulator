@@ -315,6 +315,7 @@ export class UI {
     let html = '';
     for (const [kind, title] of groups) {
       if (this.tab !== 'all' && this.tab !== kind) continue;
+      if (this.tab === 'all' && kind === 'microbe' && sim.seaSettled) continue;
       const list = sim.alive
         .filter((s) => s.kind === kind)
         .sort((a, b) => (this.sortBy === 'size' ? b.genome.size - a.genome.size : this.sortBy === 'newest' ? b.bornTick - a.bornTick : b.totalPop - a.totalPop));

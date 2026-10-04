@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Evolution Simulator</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌍</text></svg>" />
+  </head>
+  <body>
+    <div id="app">
+      <header id="topbar">
+        <div class="brand">
+          <span class="globe">🌍</span>
+          <div>
+            <h1>Evolution</h1>
+            <small>a god game</small>
+          </div>
+        </div>
+        <div class="clock">
+          <div class="clock-row"><span id="year">Year 0</span><span id="age">Age of Microbes</span></div>
+          <div class="timebar" title="A million years: time races at first and slows as life grows complex"><div id="timefill"></div></div>
+        </div>
+        <div class="speed" id="speed"></div>
+        <div class="energy" id="energy" title="Divine energy: spent on every intervention, regained with time"></div>
+        <div class="goal" id="goal"></div>
+        <div class="menu">
+          <button id="btn-tree" title="The family tree of everything that ever lived">🌳 Tree of Life</button>
+          <button id="btn-help" title="How to play">?</button>
+          <button id="btn-new" title="Abandon this world and start another">New world</button>
+        </div>
+      </header>
+
+      <aside id="left">
+        <section class="panel">
+          <h2>Divine Powers</h2>
+          <div id="powers"></div>
+          <div id="powerhint"></div>
+        </section>
+        <section class="panel">
+          <h2>Air, Sun &amp; Sea</h2>
+          <div id="atmos"></div>
+        </section>
+        <section class="panel">
+          <h2>The World</h2>
+          <div id="worldstats"></div>
+        </section>
+      </aside>
+
+      <main id="center">
+        <div id="mapwrap">
+          <canvas id="map"></canvas>
+          <canvas id="overlay"></canvas>
+          <div id="layers"></div>
+          <div id="zoomctl">
+            <button data-zoom="in" title="Zoom in (+ or mouse wheel)">＋</button>
+            <button data-zoom="out" title="Zoom out (−)">－</button>
+            <button data-zoom="reset" title="Whole world (0)">⌂</button>
+          </div>
+          <div id="legend"></div>
+          <div id="tooltip"></div>
+        </div>
+        <section id="chronicle" class="panel">
+          <h2>Chronicle</h2>
+          <div id="log"></div>
+        </section>
+      </main>
+
+      <aside id="right">
+        <section class="panel" id="species-panel">
+          <h2>Life <span id="spcount"></span></h2>
+          <div id="tabs"></div>
+          <div id="splist"></div>
+        </section>
+        <section class="panel" id="detail"></section>
+      </aside>
+    </div>
+    <div id="tut-spot"></div>
+    <div id="tut-box"></div>
+    <div id="modal"></div>
+    <div id="toasts"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

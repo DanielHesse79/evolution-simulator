@@ -5,7 +5,7 @@ export type Diet = 'chemo' | 'photo' | 'herb' | 'carn' | 'omni';
 export type Habitat = 'aquatic' | 'amphibious' | 'terrestrial';
 export type Kind = 'microbe' | 'plant' | 'animal';
 
-export const TRAIT_KEYS = ['horns', 'armor', 'speed', 'grasp', 'fur', 'flight', 'social', 'intel', 'immunity', 'toxin', 'fertility'] as const;
+export const TRAIT_KEYS = ['horns', 'armor', 'speed', 'grasp', 'fur', 'flight', 'social', 'intel', 'immunity', 'toxin', 'fertility', 'roots', 'frost'] as const;
 export type TraitKey = (typeof TRAIT_KEYS)[number];
 
 export interface Genome {
@@ -32,6 +32,10 @@ export interface Genome {
   immunity: number;
   toxin: number;
   fertility: number;
+  /** Plants only: deep roots (on land) or a strong holdfast (in water). */
+  roots: number;
+  /** Plants only: needles, antifreeze and dormancy that let it survive the cold. */
+  frost: number;
 }
 
 export const TIER_NAMES = ['Prokaryote', 'Eukaryote', 'Simple multicellular', 'Complex organism', 'Advanced organism'];
@@ -70,7 +74,26 @@ export const TRAIT_INFO: Record<TraitKey, { label: string; icon: string; hint: s
   immunity: { label: 'Immunity', icon: '💉', hint: 'Resistance to plagues.' },
   toxin: { label: 'Toxins', icon: '☠️', hint: 'Venom, poison or thorns that deter whoever tries to eat it.' },
   fertility: { label: 'Fertility', icon: '🥚', hint: 'Breeds and spreads fast, but competes poorly when the land is crowded.' },
+  roots: { label: 'Roots', icon: '🫚', hint: 'Deep roots reach water in a drought and sprout again after a fire. They cost growth.' },
+  frost: { label: 'Frost hardiness', icon: '❄️', hint: 'Needles, antifreeze and winter sleep: survives the cold, but grows more slowly.' },
 };
+
+/** How a trait is named and explained for this kind of creature: plants have their own words for things. */
+export function traitInfo(g: Genome, k: TraitKey | 'size'): { label: string; icon: string; hint: string } {
+  const plant = isAuto(g) && g.tier >= 2;
+  if (k === 'size') {
+    return plant
+      ? { label: 'Height', icon: '📏', hint: 'Tall plants overtop and shade their rivals, but need more water, burn harder and are reached by big browsers, climbers and flyers.' }
+      : { label: 'Body size', icon: '⚖️', hint: 'Bigger bodies escape small predators and overtop rivals, but breed slowly and need more oxygen and water.' };
+  }
+  if (plant) {
+    if (k === 'armor') return { label: 'Thorns & bark', icon: '🌵', hint: 'Thorns put grazers off and thick bark survives fire. Both cost growth.' };
+    if (k === 'fertility') return { label: 'Seeds', icon: '🌰', hint: 'More and lighter seeds: spreads further, crosses straits on the wind and is first to settle burnt or empty land.' };
+    if (k === 'toxin') return { label: 'Toxins', icon: '☠️', hint: 'Bitter poisons that put grazers off. They cost growth.' };
+    if (k === 'roots' && g.habitat === 'aquatic') return { label: 'Holdfast', icon: '⚓', hint: 'A strong grip on the rock lets big seaweed anchor further out, in deeper and rougher water.' };
+  }
+  return TRAIT_INFO[k];
+}
 
 export function clamp(v: number, a: number, b: number): number {
   return v < a ? a : v > b ? b : v;
@@ -96,8 +119,11 @@ export function traitCap(g: Genome, k: TraitKey): number {
   if (isAuto(g)) {
     if (k === 'toxin') return t >= 2 ? 1 : 0.4;
     if (k === 'armor') return t >= 3 ? 1 : t === 2 ? 0.3 : 0;
+    if (k === 'roots') return t < 2 ? 0 : g.habitat === 'aquatic' ? 0.6 : t === 2 ? 0.35 : 1;
+    if (k === 'frost') return t < 2 ? 0 : g.habitat === 'aquatic' ? 0.4 : t === 2 ? 0.6 : 1;
     return 0;
   }
+  if (k === 'roots' || k === 'frost') return 0;
   if (k === 'flight') {
     if (t < 3 || g.habitat === 'aquatic') return 0;
     return clamp((7.5 - g.size) / 2, 0, 1);
@@ -146,7 +172,7 @@ export function tempResponse(g: Genome, t: number): number {
   const d = t - g.tempOpt;
   // fur keeps out the cold; a truly clever animal makes its own shelter, clothing and fire
   const wit = Math.max(0, g.intel - 0.5) * 2;
-  const s = d < 0 ? g.tempTol + g.fur * 10 + wit * 6 : g.tempTol * (1 - 0.3 * g.fur) + wit * 4;
+  const s = d < 0 ? g.tempTol + g.fur * 10 + wit * 6 + g.frost * 9 : g.tempTol * (1 - 0.3 * g.fur) + wit * 4;
   let v = Math.exp(-0.5 * (d / s) * (d / s));
   if (g.tier >= 1 && t > 46) v *= Math.max(0, 1 - (t - 46) / 8);
   return v;
@@ -160,11 +186,12 @@ export function phResponse(g: Genome, ph: number): number {
 /** Response to rainfall; only meaningful on land. Big plants need a lot of water. */
 export function moistResponse(g: Genome, m: number): number {
   const auto = isAuto(g);
-  const tol = auto ? g.moistTol : g.moistTol + 0.18;
+  // deep roots reach the water that a dry spell leaves behind
+  const tol = auto ? g.moistTol + (m < g.moistOpt ? 0.15 * g.roots : 0) : g.moistTol + 0.18;
   const d = (m - g.moistOpt) / tol;
   let v = Math.exp(-0.5 * d * d);
   if (auto) {
-    const need = 0.1 + 0.065 * g.size;
+    const need = 0.1 + 0.065 * g.size - 0.12 * g.roots;
     v *= 1 / (1 + Math.exp(-(m - need) / 0.05));
   }
   return v;
@@ -174,7 +201,8 @@ export function moistResponse(g: Genome, m: number): number {
 export function habFactors(g: Genome): [number, number, number, number] {
   const auto = isAuto(g);
   if (g.habitat === 'aquatic') {
-    if (g.diet === 'photo') return g.size > 2.5 ? [0.05, 1, 0, 0] : [0.75, 1, 0, 0];
+    // a strong holdfast lets big seaweed anchor further out, in deeper and rougher water
+    if (g.diet === 'photo') return g.size > 2.5 ? [0.05 + 0.6 * g.roots, 1, 0, 0] : [0.75, 1, 0, 0];
     if (g.diet === 'chemo') return [1, 0.8, 0, 0];
     return [0.8, 1, 0, 0];
   }
@@ -430,6 +458,8 @@ function describePlant(g: Genome): { desc: string; icon: string } {
   if (g.toxin > 0.6) adj.push('poisonous');
   if (g.armor > 0.6) adj.push(g.size > 5 ? 'thick-barked' : 'thorny');
   if (g.tempOpt < 2 && !aquatic) adj.push('arctic');
+  else if (g.frost > 0.6 && !aquatic) adj.push('frost-hardy');
+  if (g.roots > 0.65 && !aquatic && g.size < 7) adj.push('deep-rooted');
   const text = [...adj.slice(0, 2), noun].join(' ');
   return { desc: text.charAt(0).toUpperCase() + text.slice(1), icon };
 }

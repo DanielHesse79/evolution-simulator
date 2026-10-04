@@ -1,5 +1,6 @@
 import { CLS_WET, H, M_LUT, M_WATER, N, P_LUT, T_LUT, W, World } from './world';
 import { RNG } from './rng';
+import { buildRegions, type Region } from './regions';
 import {
   SENTIENCE,
   clamp,
@@ -107,6 +108,20 @@ export interface Plague {
   natural: boolean;
 }
 
+/** How a (possibly imagined) genome would fare as a newcomer in a set of places. */
+export interface Forecast {
+  /** Mean per-capita growth rate as a rare newcomer; above zero it can take hold. */
+  growth: number;
+  /** 0..5 for the player. */
+  stars: number;
+  /** The most important reasons, worst first; good news last. */
+  notes: string[];
+  /** The best spot found for it, for releasing it there. */
+  bestCell: number;
+  /** How many of the sampled places it could live in at all. */
+  habitable: number;
+}
+
 export interface HistorySample {
   tick: number;
   o2: number;
@@ -157,6 +172,9 @@ export class Sim {
   readonly goal: GoalId;
   readonly sandbox: boolean;
   readonly diff: Difficulty;
+  /** The world divided into named lands and seas. */
+  readonly regions: Region[];
+  readonly regionOf: Int16Array;
 
   tick = 0;
   year = 0;
@@ -200,6 +218,8 @@ export class Sim {
   private totCells = new Int32Array(MAXS);
   /** Food eaten this step: eater slot × food slot. Flushed into the species' records every step. */
   private eatMat = new Float64Array(MAXS * MAXS);
+  /** 1 for species under God's protection this step. */
+  private shelter = new Uint8Array(MAXS);
   /** Biomass lost this step to a failing growth balance: hunger, crowding, a hostile climate. */
   private hungerLoss = new Float64Array(MAXS);
   // scratch buffers for the per-cell loop
@@ -246,6 +266,7 @@ export class Sim {
     if (this.sandbox) this.energy = MAX_ENERGY;
     this.rng = new RNG(seed ^ 0x51ed270b);
     this.world = new World(seed);
+    ({ regions: this.regions, regionOf: this.regionOf } = buildRegions(this.world, seed));
     this.computeReferences();
     this.seedLife();
     this.log('🌊', 'In the warm, lightless depths, something begins to copy itself.', { major: true });
@@ -308,6 +329,8 @@ export class Sim {
       immunity: 0.1,
       toxin: 0,
       fertility: 0.5,
+      roots: 0,
+      frost: 0,
     };
     sanitize(luca);
     const sp = this.addSpecies(luca, null, true);
@@ -460,6 +483,7 @@ export class Sim {
     if (this.status !== 'running' && !this.freePlay) return;
     this.tick++;
     this.year = yearAt(this.tick);
+    for (const sp of this.alive) this.shelter[sp.slot] = sp.shelterUntil > this.tick ? 1 : 0;
     this.updateAtmosphere();
     if (this.climateDirty || this.tick % 4 === 0) {
       this.world.updateClimate();
@@ -557,6 +581,7 @@ export class Sim {
         const d = dietCode[s];
         let C = 0;
         for (let b = 0; b < n; b++) C += alpha[row + ps[b]] * pp[b];
+        if (this.shelter[s]) C *= 0.45;
         let K: number;
         if (d === D_PHOTO) K = Kp;
         else if (d === D_CHEMO) K = Kc;
@@ -620,6 +645,7 @@ export class Sim {
         const P0 = pp[a];
         let l = loss[a];
         if (l > 0.7 * P0) l = 0.7 * P0;
+        if (this.shelter[s]) l = 0;
         let P = P0 + gain[a] - l;
         if (gain[a] < 0) hungerLoss[s] -= gain[a];
         if (P < MINP) {
@@ -685,7 +711,7 @@ export class Sim {
         let radius = 0;
         if (g.flight > 0.3) radius = 2 + 6 * g.flight;
         // seeds of flowering plants ride the wind and the guts of animals
-        else if (g.tier >= 4 && g.habitat !== 'aquatic' && this.slots[s]!.derived.auto && this.rng.chance(0.25)) radius = 4;
+        else if (g.tier >= 3 && g.habitat !== 'aquatic' && this.slots[s]!.derived.auto && this.rng.chance((g.tier >= 4 ? 0.12 : 0.04) + 0.3 * g.fertility)) radius = 3 + 3 * g.fertility;
         else if (g.habitat !== 'aquatic' && w.distCoast[c] <= 1 && this.rng.chance(0.03)) radius = 4;
         else if (g.habitat === 'aquatic' && this.rng.chance(0.01)) radius = 3;
         if (radius <= 0) continue;
@@ -748,7 +774,7 @@ export class Sim {
         continue;
       }
       // a species reduced to a scattering of individuals cannot hold on for long
-      if (sp.totalPop < viablePop(sp)) {
+      if (sp.totalPop < viablePop(sp) && sp.shelterUntil <= this.tick) {
         if (++sp.lowTicks > (sp.established ? 40 : 25)) {
           this.extinct(sp);
           continue;
@@ -964,7 +990,7 @@ export class Sim {
       const members = this.alive.filter((o) => guildKey(o.genome) === key);
       if (members.length >= (child.tier <= 1 ? 2 : 4)) {
         let weakest: Species | null = null;
-        for (const o of members) if (o !== parent && o.established && (!weakest || o.totalPop < weakest.totalPop)) weakest = o;
+        for (const o of members) if (o !== parent && o.established && !o.playerMade && (!weakest || o.totalPop < weakest.totalPop)) weakest = o;
         if (!weakest || weakest.totalPop > 0.05 * parent.totalPop) return null;
         this.extinct(weakest, `it was crowded out of its niche by a new offshoot of ${parent.name}, which lives the same way`);
       } else if (this.nAlive >= HARD_CAP) {
@@ -974,7 +1000,7 @@ export class Sim {
         let weakest: Species | null = null;
         let worst = Infinity;
         for (const o of this.alive) {
-          if (o === parent || !o.established || o.sentient || (counts.get(guildKey(o.genome)) ?? 0) < 2) continue;
+          if (o === parent || !o.established || o.sentient || o.playerMade || (counts.get(guildKey(o.genome)) ?? 0) < 2) continue;
           const ratio = o.totalPop / viablePop(o);
           if (ratio < worst) {
             worst = ratio;
@@ -1154,7 +1180,7 @@ export class Sim {
   }
 
   /** Who lives in a cell, and how hard each of them grazes (qH) and hunts (qC) per unit of food. */
-  private community(c: number): { list: Species[]; pops: number[]; qH: number[]; qC: number[] } {
+  community(c: number): { list: Species[]; pops: number[]; qH: number[]; qC: number[] } {
     const base = c * MAXS;
     const cnp = this.world.canopy[c];
     const list: Species[] = [];
@@ -1232,6 +1258,175 @@ export class Sim {
     else K = d.kBonus * (d.effH * Fp + d.effC * Fc);
     if (K <= 1e-6) return -1;
     return d.rate * Math.max(-0.6, fitHere - MAINT - C / K) - lossRate;
+  }
+
+  /**
+   * How would this genome fare if it arrived, rare, in these places? Its fit to the climate, the food on
+   * offer, the rivals and the hunters are weighed just as the simulation does it, and the worst problems
+   * are named. `self` (if given) is left out of the picture, as if it had not been there.
+   */
+  forecast(g: Genome, cells: number[], self: Species | null = null, maxSamples = 10, comCache?: Map<number, ReturnType<Sim['community']>>): Forecast {
+    const w = this.world;
+    const hf = habFactors(g);
+    const ok = cells.filter((c) => hf[w.cls[c]] > 0.02);
+    const out: Forecast = { growth: -1, stars: 0, notes: [], bestCell: -1, habitable: ok.length };
+    if (!ok.length) {
+      out.notes.push(g.habitat === 'aquatic' ? 'it cannot leave the water' : g.habitat === 'terrestrial' ? 'it would drown here' : 'there is no shore here for it');
+      return out;
+    }
+    const step = Math.max(1, Math.floor(ok.length / maxSamples));
+    const d = derive(g);
+    let n = 0;
+    let growth = 0;
+    let tF = 0;
+    let pF = 0;
+    let mF = 0;
+    let oF = 0;
+    let temp = 0;
+    let ph = 0;
+    let moist = 0;
+    let land = 0;
+    let food = 0;
+    let crowd = 0;
+    let danger = 0;
+    let best = -Infinity;
+    const rivals = new Map<number, number>();
+    const hunters = new Map<number, number>();
+    for (let i = Math.floor(step / 2); i < ok.length; i += step) {
+      const c = ok[i];
+      let com = comCache?.get(c);
+      if (!com) {
+        com = this.community(c);
+        comCache?.set(c, com);
+      }
+      const cnp = w.canopy[c];
+      const t1 = tempResponse(g, w.temp[c]);
+      const p1 = phResponse(g, w.ph[c]);
+      const m1 = w.isWater[c] ? 1 : moistResponse(g, w.moist[c]);
+      const o1 = o2Factor(g, w.atm.o2, w.atm.co2);
+      const fit = t1 * p1 * m1 * hf[w.cls[c]] * (d.fitOpen + (d.fitForest - d.fitOpen) * cnp) * tierBonusOf(g) * o1;
+      let C = 0;
+      let Fp = 0;
+      let Fc = 0;
+      let loss = 0;
+      for (let j = 0; j < com.list.length; j++) {
+        const o = com.list[j];
+        if (o === self) continue;
+        const P = com.pops[j];
+        const a = pairAlpha(g, o.genome) * P;
+        C += a;
+        if (a > 0) rivals.set(o.id, (rivals.get(o.id) ?? 0) + a);
+        if (d.effH > 0) Fp += pairEdible(g, o.genome) * P;
+        if (d.effC > 0) {
+          const acc = pairAccess(g, d, o.genome, o.derived);
+          Fc += (acc[0] + (acc[1] - acc[0]) * cnp) * P;
+        }
+        let l = 0;
+        if (com.qH[j] > 0) l += com.qH[j] * pairEdible(o.genome, g) * d.grazeLoss;
+        if (com.qC[j] > 0) {
+          const acc = pairAccess(o.genome, o.derived, g, d);
+          l += com.qC[j] * (acc[0] + (acc[1] - acc[0]) * cnp);
+        }
+        if (l > 0) hunters.set(o.id, (hunters.get(o.id) ?? 0) + l);
+        loss += l;
+      }
+      let K: number;
+      if (g.diet === 'photo') K = KSCALE * w.photoProd[c];
+      else if (g.diet === 'chemo') K = KSCALE * w.chemoProd[c];
+      else K = d.kBonus * (d.effH * Fp + d.effC * Fc);
+      const gr = K > 1e-3 ? d.rate * Math.max(-0.6, fit - MAINT - C / K) - loss : -0.6 * d.rate - loss;
+      if (gr > best) {
+        best = gr;
+        out.bestCell = c;
+      }
+      n++;
+      growth += gr;
+      tF += t1;
+      pF += p1;
+      oF += o1;
+      temp += w.temp[c];
+      ph += w.ph[c];
+      if (!w.isWater[c]) {
+        mF += m1;
+        moist += w.moist[c];
+        land++;
+      }
+      food += K > 1e-3 ? Math.min(1, K / (KSCALE * 0.15)) : 0;
+      crowd += K > 1e-3 ? Math.min(2, C / K) : 2;
+      danger += loss;
+    }
+    growth /= n;
+    tF /= n;
+    pF /= n;
+    oF /= n;
+    temp /= n;
+    ph /= n;
+    food /= n;
+    crowd /= n;
+    danger /= n;
+    if (land) {
+      mF /= land;
+      moist /= land;
+    } else mF = 1;
+    out.growth = growth;
+    out.stars = growth > 0.06 ? 5 : growth > 0.035 ? 4 : growth > 0.015 ? 3 : growth > 0.003 ? 2 : growth > -0.01 ? 1 : 0;
+
+    // the reasons, worst first
+    const name = (m: Map<number, number>) => {
+      const top = [...m.entries()].sort((a, b) => b[1] - a[1])[0];
+      return top ? this.species[top[0]].name : '';
+    };
+    const issues: [number, string][] = [];
+    if (tF < 0.7) issues.push([1 - tF, temp > g.tempOpt ? `too hot (around ${Math.round(temp)} °C)` : `too cold (around ${Math.round(temp)} °C)`]);
+    if (pF < 0.7) issues.push([1 - pF, ph < g.phOpt ? `too acidic (pH ${ph.toFixed(1)})` : `too alkaline (pH ${ph.toFixed(1)})`]);
+    if (land && mF < 0.7) issues.push([1 - mF, moist < g.moistOpt ? 'too dry' : 'too wet']);
+    if (oF < 0.8) issues.push([1 - oF, g.tier === 0 && g.diet === 'chemo' ? 'too much oxygen' : 'too little oxygen']);
+    if (!d.auto && food < 0.25) issues.push([1 - food * 2, 'little to eat here']);
+    if (danger > 0.02) issues.push([danger * 8, `dangerous: ${name(hunters)} ${d.auto ? 'grazes' : 'hunts'} here`]);
+    if (crowd > 0.7) issues.push([crowd - 0.4, `crowded by rivals such as ${name(rivals)}`]);
+    issues.sort((a, b) => b[0] - a[0]);
+    out.notes = issues.slice(0, 3).map((x) => x[1]);
+    if (!issues.length || growth > 0.02) {
+      if (!d.auto && food > 0.6) out.notes.push('plenty to eat');
+      if (danger < 0.003) out.notes.push('few enemies');
+      if (tF > 0.85 && pF > 0.85 && mF > 0.85) out.notes.push('a climate that suits it');
+    }
+    return out;
+  }
+
+  /**
+   * Bring a designed mutant into the world. Next to its parent, part of the parent population takes
+   * on the change; elsewhere a band of founders is set down. A shelter keeps it safe for a while.
+   */
+  createMutant(parent: Species, genome: Genome, cell: number, shelterTicks: number): Species | null {
+    if (!parent.alive || this.nAlive >= MAXS - 1) return null;
+    const w = this.world;
+    sanitize(genome);
+    const major = genome.tier !== parent.genome.tier || genome.diet !== parent.genome.diet || genome.habitat !== parent.genome.habitat;
+    const sp = this.addSpecies(genome, parent, major);
+    if (!sp) return null;
+    let near = 0;
+    this.forRadius(cell, 3, (c) => (near += this.pop[c * MAXS + parent.slot]));
+    if (near > 20) {
+      this.forRadius(cell, 3, (c) => {
+        const idx = c * MAXS + parent.slot;
+        const moved = this.pop[idx] * 0.4;
+        if (moved > 0 && this.hab[sp.slot * 4 + w.cls[c]] > 0.02) {
+          this.pop[idx] -= moved;
+          this.pop[c * MAXS + sp.slot] += moved;
+        }
+      });
+    }
+    if (near <= 20 || this.pop[cell * MAXS + sp.slot] < 1) {
+      const founders = Math.max(40, Math.min(400, parent.totalPop * 0.03));
+      this.forRadius(cell, 2, (c, dist) => {
+        if (this.hab[sp.slot * 4 + w.cls[c]] > 0.02) this.pop[c * MAXS + sp.slot] += founders * (1 - dist / 3) * 0.3;
+      });
+    }
+    sp.shelterUntil = this.tick + shelterTicks;
+    sp.playerMade = true;
+    this.addEffect('spark', cell, 3);
+    return sp;
   }
 
   /** Put a founding population at a cell and its habitable neighbours. Returns cells settled. */
@@ -1597,6 +1792,7 @@ export class Sim {
     const nb = this.world.nb;
     for (const pl of this.plagues.slice()) {
       const sp = this.species[pl.speciesId];
+      if (sp.alive && sp.shelterUntil > this.tick) continue;
       if (!sp.alive) continue;
       const slot = sp.slot;
       const mort = pl.mortality * (1 - 0.85 * sp.genome.immunity);

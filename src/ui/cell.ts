@@ -517,6 +517,8 @@ function cellTypes(g: Genome, plantLike: boolean): CellType[] {
     } else out.push({ icon: '⚓', name: 'Holdfast', desc: 'Grips the rock so the waves cannot tear the plant away.' });
     if (g.tier >= 3 && land) out.push({ icon: '🚰', name: 'Xylem and phloem', desc: 'Pipes of hollow cells that lift water up and carry sugar down. They are what let plants grow tall.' });
     if (g.size > 5 || g.armor > 0.3) out.push({ icon: '🪵', name: 'Wood and bark', desc: `Dead cells with thick, hardened walls: height to win the race for light${g.armor > 0.3 ? ', and armour against grazers' : ''}.` });
+    if (g.roots > 0.4 && land) out.push({ icon: '🫚', name: 'Deep roots', desc: `A taproot that reaches water far below a dry surface and sprouts again after fire (roots ${pct(g.roots)}).` });
+    if (g.frost > 0.4) out.push({ icon: '❄️', name: 'Frost-proof cells', desc: `Sugars and antifreeze proteins keep ice from bursting the cells (frost hardiness ${pct(g.frost)}).` });
     if (g.toxin > 0.25) out.push({ icon: '☠️', name: 'Toxin cells', desc: `Store bitter poisons that put grazers off (toxin ${pct(g.toxin)}).` });
     if (g.tier >= 4 && land) out.push({ icon: '🌸', name: 'Flowers and pollen', desc: 'Sex cells carried by wind and animals to other plants.' });
     else out.push({ icon: '🫧', name: 'Spores', desc: 'Tough single cells that drift away to start new plants.' });
@@ -575,6 +577,8 @@ const BASE: Genome = {
   immunity: 0.1,
   toxin: 0,
   fertility: 0.5,
+  roots: 0,
+  frost: 0,
 };
 
 /** Textbook cells to compare with. */

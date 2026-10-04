@@ -64,7 +64,7 @@ export interface Derived {
 export function derive(g: Genome): Derived {
   const auto = isAuto(g);
   const cost = auto
-    ? 0.22 * g.toxin + 0.18 * g.armor + 0.05 * g.immunity
+    ? 0.22 * g.toxin + 0.18 * g.armor + 0.05 * g.immunity + 0.1 * g.roots + 0.12 * g.frost
     : 0.07 * g.horns + 0.12 * g.armor + 0.08 * g.speed + 0.05 * g.grasp + 0.02 * g.fur + 0.12 * g.flight + 0.04 * g.social + 0.26 * g.intel + 0.05 * g.immunity + 0.14 * g.toxin;
   // fast breeders compete poorly; generalists pay for their breadth
   let base = (1 - cost) * (1.1 - 0.25 * g.fertility);
@@ -93,7 +93,7 @@ export function derive(g: Genome): Derived {
   let disp: number;
   if (g.tier <= 1) disp = 0.15;
   else if (g.habitat === 'aquatic') disp = auto ? 0.08 : 0.1 + 0.08 * g.speed;
-  else if (auto) disp = 0.03 + 0.05 * g.fertility + (g.tier >= 4 ? 0.04 : 0);
+  else if (auto) disp = 0.03 + 0.07 * g.fertility + (g.tier >= 4 ? 0.04 : 0);
   else disp = 0.04 + 0.1 * speedEff + 0.12 * g.flight + 0.03 * g.fertility;
 
   const synergy = 0.5 * g.social + 0.5 * g.grasp;
@@ -149,7 +149,8 @@ function fireLoss(g: Genome): number {
   if (!isAuto(g)) return 0.35 * (1 - 0.8 * g.flight) * (1 - 0.4 * g.speed);
   const tall = clamp((g.size - 4.2) / 2.5, 0, 1);
   const base = tall > 0 ? 0.55 + 0.3 * tall : g.tier >= 4 && g.size < 3 ? 0.15 : 0.4;
-  return base * (1 - 0.5 * g.armor);
+  // thick bark shields the stem; deep roots sprout again once the fire has passed
+  return base * (1 - 0.5 * g.armor) * (1 - 0.55 * g.roots);
 }
 
 /** Competition felt by `a` from one unit of `b` sharing the same cell. */
@@ -247,6 +248,10 @@ export class Species {
   historyStart = -1;
   /** The continents it reached, in order. */
   reached: { name: string; year: number }[] = [];
+  /** Until this step the species is shielded by God: nothing eats it and rivals press it less. */
+  shelterUntil = -1;
+  /** Made by God in the lab or with guided evolution: never culled to make room, only by nature. */
+  playerMade = false;
 
   constructor(genome: Genome) {
     this.genome = genome;

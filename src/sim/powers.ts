@@ -1,4 +1,4 @@
-import { MAX_SIZE, TRAIT_INFO, minSize, traitCap, type TraitKey } from './genome';
+import { MAX_SIZE, minSize, traitCap, traitInfo, type TraitKey } from './genome';
 import { MAXS, MINP, type Sim } from './simulation';
 import type { Species } from './species';
 
@@ -170,7 +170,7 @@ export function guideEvolution(sim: Sim, sp: Species, key: GuideKey, dir: 1 | -1
   if (key === 'intel' && dir > 0 && sp.genome.tier === 4 && sp.genome.intel < 0.98 && !canGuide(sp, key, dir)) {
     return fail('A mind cannot grow alone. Give this creature grasping limbs and a social life first.');
   }
-  if (!canGuide(sp, key, dir)) return fail(key === 'size' ? 'This body plan cannot change size any further.' : `This body plan cannot ${dir > 0 ? 'develop' : 'reduce'} ${TRAIT_INFO[key].label.toLowerCase()} any further.`);
+  if (!canGuide(sp, key, dir)) return fail(key === 'size' ? 'This body plan cannot change size any further.' : `This body plan cannot ${dir > 0 ? 'develop' : 'reduce'} ${traitInfo(sp.genome, key).label.toLowerCase()} any further.`);
   if (!sim.canAfford(GUIDE_COST)) return fail(`Not enough divine energy (${sim.price(GUIDE_COST)} needed).`);
   const cell = sim.densestCell(sp);
   if (cell < 0) return fail('The species is too scattered.');
@@ -184,7 +184,9 @@ export function guideEvolution(sim: Sim, sp: Species, key: GuideKey, dir: 1 | -1
   if (!child) return fail('The world has no room for another species right now.');
   sim.spend(GUIDE_COST);
   sim.addEffect('spark', cell, 2);
-  const what = key === 'size' ? (dir > 0 ? 'greater size' : 'smaller size') : `${dir > 0 ? 'more' : 'less'} ${TRAIT_INFO[key].label.toLowerCase()}`;
+  const what = key === 'size' ? (dir > 0 ? 'greater size' : 'smaller size') : `${dir > 0 ? 'more' : 'less'} ${traitInfo(sp.genome, key).label.toLowerCase()}`;
+  child.shelterUntil = sim.tick + 40;
+  child.playerMade = true;
   sim.log('🧬', `You reach into ${sp.name} and draw out a new form with ${what}: ${child.name}.`, { speciesId: child.id, cell });
   return { ok: true, msg: `${child.name} is born.` };
 }

@@ -1,12 +1,12 @@
-import { DIET_NAMES, HABITAT_NAMES, TIER_NAMES, TRAIT_INFO, TRAIT_KEYS, formatHeadcount, formatMass, traitCap, type Kind } from '../sim/genome';
+import { DIET_NAMES, HABITAT_NAMES, TIER_NAMES, TRAIT_KEYS, describe, habFactors, sanitize, traitInfo, formatHeadcount, formatMass, traitCap, type Kind } from '../sim/genome';
 import { GUIDE_COST, POWERS, canGuide, guideEvolution, usePower, type GuideKey, type PowerId } from '../sim/powers';
-import { DIFFICULTIES, GOALS, HIST_EVERY, MAXS, MAX_ENERGY, Sim, TOTAL_TICKS, yearAt, type AtmKey, type DifficultyId, type GoalId } from '../sim/simulation';
+import { DIFFICULTIES, GOALS, HIST_EVERY, MAXS, MAX_ENERGY, Sim, TOTAL_TICKS, yearAt, type AtmKey, type DifficultyId, type Forecast, type GoalId } from '../sim/simulation';
 import type { Genome } from '../sim/genome';
 import type { Species } from '../sim/species';
 import { CELL_EXAMPLES, buildCell } from './cell';
 import { portrait } from './portrait';
 import { tutorialSeen } from './tutorial';
-import { N } from '../sim/world';
+import { H, N, W } from '../sim/world';
 import { LAYERS, type Layer, type MapRenderer } from './renderer';
 import { drawTree, treeHit, type TreeLayout } from './tree';
 
@@ -30,6 +30,10 @@ export interface Game {
   /** The place being inspected on the map, and how far around it to look. */
   place: { cell: number; radius: number } | null;
   setPlace(cell: number | null, radius?: number): void;
+  /** The species the camera keeps in view, or -1. */
+  followId: number;
+  setFollow(id: number): void;
+  showRegions: boolean;
   goTo(zoom: number): void;
   markDirty(): void;
   sound: { play(name: string): void };
@@ -52,6 +56,7 @@ const SPEED_TITLES = ['Pause (space)', 'Normal speed (1)', 'Fast (2)', 'Very fas
 
 export class UI {
   tab: Tab = 'all';
+  sortBy: 'numbers' | 'size' | 'newest' = 'numbers';
   private logCount = 0;
   private dragging: AtmKey | null = null;
   private hoverPower: PowerId | null = null;
@@ -121,7 +126,13 @@ export class UI {
     }
 
     $('layers').innerHTML = LAYERS.map((l) => `<button data-layer="${l.id}">${l.icon} ${l.name}</button>`).join('');
+    $('layers').insertAdjacentHTML('beforeend', '<button data-regions title="Show the borders and names of the regions">🗺️ Regions</button>');
     $('layers').addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('[data-regions]')) {
+        g.showRegions = !g.showRegions;
+        this.refresh(performance.now(), true);
+        return;
+      }
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-layer]');
       if (b) g.setLayer(b.dataset.layer as Layer);
     });
@@ -132,8 +143,15 @@ export class UI {
       ['plant', 'Plants'],
       ['microbe', 'Microbes'],
     ];
-    $('tabs').innerHTML = tabs.map(([id, name]) => `<button data-tab="${id}">${name}</button>`).join('');
+    $('tabs').innerHTML = tabs.map(([id, name]) => `<button data-tab="${id}">${name}</button>`).join('') + '<button data-sort title="Sort by numbers, body size or age">↕</button>';
     $('tabs').addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('[data-sort]')) {
+        const order: ('numbers' | 'size' | 'newest')[] = ['numbers', 'size', 'newest'];
+        this.sortBy = order[(order.indexOf(this.sortBy) + 1) % order.length];
+        this.toast(`Sorted by ${this.sortBy === 'numbers' ? 'numbers' : this.sortBy === 'size' ? 'body size, biggest first' : 'age, newest first'}`);
+        this.refresh(performance.now(), true);
+        return;
+      }
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-tab]');
       if (!b) return;
       this.tab = b.dataset.tab as Tab;
@@ -222,6 +240,9 @@ export class UI {
     $('layers')
       .querySelectorAll<HTMLElement>('[data-layer]')
       .forEach((b) => b.classList.toggle('on', b.dataset.layer === g.renderer.layer));
+    $('layers').querySelector('[data-regions]')?.classList.toggle('on', g.showRegions);
+    const sortBtn = $('tabs').querySelector<HTMLElement>('[data-sort]');
+    if (sortBtn) sortBtn.textContent = this.sortBy === 'numbers' ? '↕ №' : this.sortBy === 'size' ? '↕ Size' : '↕ New';
     $('tabs')
       .querySelectorAll<HTMLElement>('[data-tab]')
       .forEach((b) => b.classList.toggle('on', b.dataset.tab === this.tab));
@@ -294,7 +315,9 @@ export class UI {
     let html = '';
     for (const [kind, title] of groups) {
       if (this.tab !== 'all' && this.tab !== kind) continue;
-      const list = sim.alive.filter((s) => s.kind === kind).sort((a, b) => b.totalPop - a.totalPop);
+      const list = sim.alive
+        .filter((s) => s.kind === kind)
+        .sort((a, b) => (this.sortBy === 'size' ? b.genome.size - a.genome.size : this.sortBy === 'newest' ? b.bornTick - a.bornTick : b.totalPop - a.totalPop));
       if (!list.length) continue;
       const max = Math.log10(1 + list[0].totalPop) || 1;
       if (this.tab === 'all') html += `<div class="sp-head">${title} · ${list.length}</div>`;
@@ -381,10 +404,12 @@ export class UI {
       const btn = (dir: 1 | -1) => `<button data-guide="${key}" data-dir="${dir}" ${open(dir) ? '' : 'disabled'} title="Guide evolution: ${dir > 0 ? 'more' : 'less'} (${g.sim.price(GUIDE_COST)}⚡)">${dir > 0 ? '+' : '−'}</button>`;
       rows.push(`<div class="trait" title="${hint}"><span>${icon}</span><span>${label}</span><span class="tb"><span style="width:${Math.round(frac * 100)}%"></span></span>${btn(-1)}${btn(1)}</div>`);
     };
-    traitRow('size', '⚖️', 'Body size', 'Bigger bodies escape small predators and overtop rivals, but breed slowly and need more oxygen and water.', gn.size / 10);
+    const si = traitInfo(gn, 'size');
+    traitRow('size', si.icon, si.label, si.hint, gn.size / 10);
     for (const k of TRAIT_KEYS) {
       if (traitCap(gn, k) <= 0 && gn[k] <= 0.01) continue;
-      traitRow(k, TRAIT_INFO[k].icon, TRAIT_INFO[k].label, TRAIT_INFO[k].hint, gn[k]);
+      const ti = traitInfo(gn, k);
+      traitRow(k, ti.icon, ti.label, ti.hint, gn[k]);
     }
 
     el.innerHTML = `
@@ -401,12 +426,12 @@ export class UI {
       <div class="d-facts">${facts.map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join('')}</div>
       ${this.sparkline(sp)}
       <div class="traits">${rows.join('')}</div>
-      ${sp.alive ? `<div class="guide-note">＋/− guides evolution: a daughter species with the change is born (${sim.price(GUIDE_COST)}⚡). Selection decides whether she lasts.</div>` : ''}
+      ${sp.alive ? `<div class="guide-note">＋/− breeds a quick mutant at home (${sim.price(GUIDE_COST)}⚡, sheltered for 40 steps). The 🧪 Mutation lab designs one with several changes and lets you choose where it starts.</div>` : ''}
       <div class="d-actions">
-        ${sp.alive ? '<button data-act="locate" title="Fly to where it is most numerous and zoom in">📍 Locate</button>' : ''}
+        ${sp.alive ? `<button data-act="follow" class="${g.followId === sp.id ? 'on' : ''}" title="Keep the camera on it as it moves (drag the map to stop)">🎥 ${g.followId === sp.id ? 'Following' : 'Follow'}</button>` : ''}
         <button data-act="stats" title="How it spread, what killed it, what ate it and what it ate">📊 Stats</button>
         <button data-act="cell" title="See how its cells are built">🔬 Cell</button>
-        ${sp.alive ? `<button data-act="plague" title="Unleash a virus where it is most numerous (${sim.price(25)}⚡)">🦠 Plague</button><button data-act="ark" title="Carry a founding population elsewhere (${sim.price(20)}⚡)">🕊️ Ark</button>` : ''}
+        ${sp.alive ? `<button data-act="where" title="Rank every region by how well it would do there">🧭 Where to?</button><button data-act="lab" title="Design a mutant, see how it would fare, choose where it starts">🧪 Lab</button><button data-act="plague" title="Unleash a virus where it is most numerous (${sim.price(25)}⚡)">🦠 Plague</button><button data-act="ark" title="Carry a founding population elsewhere (${sim.price(20)}⚡)">🕊️ Ark</button>` : ''}
       </div>`;
   }
 
@@ -439,7 +464,14 @@ export class UI {
       this.showCell(sp.genome, sp.name, sp.desc, sp.id);
       return;
     } else if (!sp?.alive) return;
-    else if (act === 'locate') g.focus(sim.densestCell(sp)); else if (act === 'plague') {
+    else if (act === 'follow') g.setFollow(g.followId === sp.id ? -1 : sp.id);
+    else if (act === 'where') {
+      this.showWhere(sp);
+      return;
+    } else if (act === 'lab') {
+      this.showLab(sp);
+      return;
+    } else if (act === 'plague') {
       const res = usePower(sim, 'plague', sim.densestCell(sp), sp);
       this.toast(res.ok ? `A plague is loose among ${sp.name}.` : res.msg, !res.ok);
     } else if (act === 'ark') {
@@ -677,6 +709,17 @@ export class UI {
   // The place inspector
   // -------------------------------------------------------------------------
 
+  private siteForecast: { key: string; f: Forecast | null } = { key: '', f: null };
+
+  /** The cells the inspector looks at: a named region, or a circle around the clicked spot. */
+  private placeCells(pl: { cell: number; radius: number }): number[] {
+    const sim = this.game.sim;
+    if (pl.radius < 0) return sim.regions[sim.regionOf[pl.cell]].cells;
+    const cells: number[] = [];
+    sim.forRadius(pl.cell, pl.radius ? pl.radius + 0.5 : 0, (c) => cells.push(c));
+    return cells;
+  }
+
   private renderSite(): void {
     const g = this.game;
     const el = $('site');
@@ -687,13 +730,12 @@ export class UI {
     }
     const sim = g.sim;
     const w = sim.world;
-    const cells: number[] = [];
-    sim.forRadius(pl.cell, pl.radius ? pl.radius + 0.5 : 0, (c) => cells.push(c));
+    const region = sim.regions[sim.regionOf[pl.cell]];
+    const cells = this.placeCells(pl);
     const tot = new Map<Species, number>();
     const biomes = new Map<string, number>();
     let t = 0;
     let ph = 0;
-    let min = 0;
     let rain = 0;
     let land = 0;
     let forest = 0;
@@ -707,72 +749,105 @@ export class UI {
       biomes.set(b, (biomes.get(b) ?? 0) + 1);
       t += w.temp[c];
       ph += w.ph[c];
-      min += w.minerals[c];
       if (!w.isWater[c]) {
         land++;
         rain += w.moist[c];
-        forest += w.canopy[c];
-        grass += w.cover[c];
+        forest += Math.min(1, w.canopy[c]);
+        grass += Math.min(1, w.cover[c]) * (1 - Math.min(1, w.canopy[c]));
       }
     }
     const n = cells.length;
-    const biome = [...biomes.entries()].sort((a, b) => b[1] - a[1])[0][0];
-    const y = Math.floor(pl.cell / 160);
-    const lat = (0.5 - (y + 0.5) / 90) * 180;
-    const where = w.isWater[pl.cell] ? 'Open sea' : w.continentName(pl.cell);
-    const km = pl.radius ? (pl.radius * 2 + 1) * 250 : 250;
+    const topBiomes = [...biomes.entries()].sort((a, b) => b[1] - a[1]);
+    const y = Math.floor(pl.cell / W);
+    const lat = (0.5 - (y + 0.5) / H) * 180;
+    const title = pl.radius < 0 ? region.name : topBiomes[0][0];
+    const sub =
+      pl.radius < 0
+        ? `${topBiomes
+            .slice(0, 2)
+            .map(([b, k]) => `${b} ${Math.round((k / n) * 100)}%`)
+            .join(', ')} · ${(n * 62500).toLocaleString('en-US')} km²`
+        : `${region.name} · ${Math.abs(lat).toFixed(0)}°${lat >= 0 ? 'N' : 'S'} · about ${(pl.radius * 2 + 1) * 250} km across`;
 
+    // the living things, grouped the way a naturalist would
+    const animals = [...tot.keys()].filter((sp) => sp.kind === 'animal');
+    const plants = [...tot.keys()].filter((sp) => sp.kind === 'plant');
     const groups: [string, Species[]][] = [
-      ['Animals', [...tot.keys()].filter((sp) => sp.kind === 'animal')],
-      ['Plants', [...tot.keys()].filter((sp) => sp.kind === 'plant')],
+      ['Hunters', animals.filter((sp) => sp.genome.diet === 'carn')],
+      ['Plant-eaters & foragers', animals.filter((sp) => sp.genome.diet !== 'carn')],
+      [w.isWater[pl.cell] && pl.radius >= 0 ? 'Kelp & tall seaweed' : 'Trees & tall plants', plants.filter((sp) => sp.derived.tall > 0.3)],
+      ['Grass, herbs, moss & algae', plants.filter((sp) => sp.derived.tall <= 0.3)],
       ['Microbes', [...tot.keys()].filter((sp) => sp.kind === 'microbe')],
     ];
     let list = '';
-    for (const [title, sps] of groups) {
+    for (const [name, sps] of groups) {
       if (!sps.length) continue;
       sps.sort((a, b) => tot.get(b)! - tot.get(a)!);
       const max = Math.log10(1 + tot.get(sps[0])!);
-      list += `<div class="site-head">${title} · ${sps.length}</div>`;
+      list += `<div class="site-head">${name} · ${sps.length}</div>`;
       for (const sp of sps) {
         const p = tot.get(sp)!;
         list += `<div class="site-sp${sp.id === g.selectedId ? ' on' : ''}" data-sp="${sp.id}">
           <img src="${this.picture(sp)}" alt="" />
-          <span class="nm"><i>${sp.name}</i><small>${sp.desc} · ${formatHeadcount(p, sp.genome.size)}</small></span>
+          <span class="nm"><i>${sp.name}</i><small>${sp.desc} · ${formatMass(sp.genome.size)} · ${formatHeadcount(p, sp.genome.size)}</small></span>
           <span class="bar"><span style="width:${Math.max(6, (Math.log10(1 + p) / max) * 100)}%;background:rgb(${sp.color.join(',')})"></span></span>
         </div>`;
       }
     }
     if (!list) list = '<div class="site-empty">Nothing lives here. Yet.</div>';
 
+    // the land itself
+    let veg = '';
+    if (land) {
+      const f = (forest / land) * 100;
+      const gr = (grass / land) * 100;
+      const bare = Math.max(0, 100 - f - gr);
+      veg = `<div class="site-veg" title="Forest ${Math.round(f)}% · grass and herbs ${Math.round(gr)}% · bare ${Math.round(bare)}%">
+        <span style="width:${f}%;background:#2f6b3a"></span><span style="width:${gr}%;background:#a8b84f"></span><span style="width:${bare}%;background:#8a7a62"></span>
+      </div><div class="site-veg-key"><span>🌳 ${Math.round(f)}% forest</span><span>🌾 ${Math.round(gr)}% grass & herbs</span><span>🪨 ${Math.round(bare)}% bare</span></div>`;
+    }
     const facts: [string, string][] = [
       ['🌡️', `${(t / n).toFixed(1)} °C`],
       ['🧪', `pH ${(ph / n).toFixed(1)}`],
-      ['💎', `${Math.round((min / n) * 100)} % minerals`],
     ];
-    if (land) {
-      facts.push(['💧', `${Math.round((rain / land) * 100)} % rain`]);
-      facts.push(['🌳', `${Math.round((forest / land) * 100)} % forest`]);
-      facts.push(['🌾', `${Math.round((grass / land) * 100)} % grass & herbs`]);
-    }
+    if (land) facts.push(['💧', `${Math.round((rain / land) * 100)} % rain`]);
     if (land < n) facts.push(['🌊', `${Math.round(((n - land) / n) * 100)} % water`]);
+
+    // how would the selected species fare here?
+    const sel = sim.species[g.selectedId];
+    let fit = '';
+    if (sel?.alive) {
+      const key = `${sel.id}|${pl.cell}|${pl.radius}|${Math.floor(sim.tick / 10)}|${sel.genome.size}`;
+      if (this.siteForecast.key !== key) this.siteForecast = { key, f: sim.forecast(sel.genome, cells, sel, 8) };
+      const fc = this.siteForecast.f!;
+      const here = tot.get(sel) ?? 0;
+      const share = sel.totalPop > 0 ? here / sel.totalPop : 0;
+      fit = `<div class="site-fit">
+        <div><span class="stars">${'★'.repeat(fc.stars)}${'☆'.repeat(5 - fc.stars)}</span> for <i>${sel.name}</i>${share > 0.005 ? ` <small>(${Math.round(share * 100)}% of them live here)</small>` : ''}</div>
+        <small>${fc.notes.join(' · ') || 'nothing in particular stands in its way'}</small>
+        ${fc.stars >= 1 && fc.bestCell >= 0 && share < 0.5 ? `<button data-site="bring">🕊️ Bring a band of them here (${sim.price(20)}⚡)</button>` : ''}
+      </div>`;
+    }
 
     const old = el.querySelector('.site-list');
     const scroll = old ? old.scrollTop : 0;
     el.style.display = 'flex';
     el.innerHTML = `
       <div class="site-top">
-        <div><h4>${biome}</h4><div class="sub">${where} · ${Math.abs(lat).toFixed(0)}°${lat >= 0 ? 'N' : 'S'} · about ${km.toLocaleString('en-US')} km across</div></div>
+        <div><h4>${title}</h4><div class="sub">${sub}</div></div>
         <button class="x" data-site="close" title="Close (Esc)">×</button>
       </div>
       <div class="site-scope">${[
-        [0, 'Spot'],
+        [-1, 'Region'],
         [3, 'Area'],
-        [8, 'Region'],
+        [0, 'Spot'],
       ]
         .map(([r, name]) => `<button data-scope="${r}" class="${pl.radius === r ? 'on' : ''}">${name}</button>`)
         .join('')}</div>
+      ${veg}
       <div class="site-facts">${facts.map(([i, v]) => `<span>${i} ${v}</span>`).join('')}</div>
-      <div class="site-go"><button data-go="6">🌳 Walk the landscape</button><button data-go="11">🔎 Up close</button></div>
+      ${fit}
+      <div class="site-go"><button data-go="${pl.radius < 0 ? 4 : 6}">🔭 ${pl.radius < 0 ? 'View the region' : 'Walk the landscape'}</button><button data-go="11">🔎 Up close</button></div>
       <div class="site-list">${list}</div>`;
     const nl = el.querySelector('.site-list');
     if (nl) nl.scrollTop = scroll;
@@ -780,15 +855,204 @@ export class UI {
 
   private onSiteClick(e: PointerEvent): void {
     const g = this.game;
+    const sim = g.sim;
     const t = e.target as HTMLElement;
     const pl = g.place;
     if (!pl) return;
     if (t.closest('[data-site="close"]')) g.setPlace(null);
-    else if (t.closest<HTMLElement>('[data-scope]')) g.setPlace(pl.cell, Number(t.closest<HTMLElement>('[data-scope]')!.dataset.scope));
-    else if (t.closest<HTMLElement>('[data-go]')) g.focus(pl.cell, Number(t.closest<HTMLElement>('[data-go]')!.dataset.go));
+    else if (t.closest('[data-site="bring"]')) {
+      const sel = sim.species[g.selectedId];
+      const fc = this.siteForecast.f;
+      if (sel?.alive && fc && fc.bestCell >= 0) {
+        const res = usePower(sim, 'transplant', fc.bestCell, sel);
+        this.toast(res.ok ? `A band of ${sel.name} is set down in ${sim.regions[sim.regionOf[fc.bestCell]].name}.` : res.msg, !res.ok);
+        this.siteForecast.key = '';
+      }
+    } else if (t.closest<HTMLElement>('[data-scope]')) g.setPlace(pl.cell, Number(t.closest<HTMLElement>('[data-scope]')!.dataset.scope));
+    else if (t.closest<HTMLElement>('[data-go]')) g.focus(pl.radius < 0 ? this.regionCentre(pl.cell) : pl.cell, Number(t.closest<HTMLElement>('[data-go]')!.dataset.go));
     else if (t.closest<HTMLElement>('[data-sp]')) g.select(Number(t.closest<HTMLElement>('[data-sp]')!.dataset.sp));
     else return;
     this.refresh(performance.now(), true);
+  }
+
+  /** The cell at the middle of the region a cell belongs to. */
+  private regionCentre(cell: number): number {
+    const sim = this.game.sim;
+    const r = sim.regions[sim.regionOf[cell]];
+    const c = Math.floor(r.cy) * W + (Math.floor(r.cx) % W);
+    return sim.regionOf[c] === r.id ? c : cell;
+  }
+
+  // -------------------------------------------------------------------------
+  // Where to? and the mutation lab
+  // -------------------------------------------------------------------------
+
+  private stars(n: number): string {
+    return `<span class="stars">${'★'.repeat(n)}${'☆'.repeat(5 - n)}</span>`;
+  }
+
+  /** Every region of the world, ranked by how well this species would do there as a newcomer. */
+  showWhere(sp: Species): void {
+    const g = this.game;
+    const sim = g.sim;
+    const cache = new Map<number, ReturnType<Sim['community']>>();
+    const home = new Map<number, number>();
+    for (const r of sim.regions) {
+      let p = 0;
+      for (const c of r.cells) p += sim.pop[c * MAXS + sp.slot];
+      if (p > 0) home.set(r.id, p);
+    }
+    const rows = sim.regions
+      .map((r) => ({ r, f: sim.forecast(sp.genome, r.cells, sp, 6, cache), share: (home.get(r.id) ?? 0) / Math.max(1e-9, sp.totalPop) }))
+      .filter((x) => x.f.habitable > 0)
+      .sort((a, b) => b.f.growth - a.f.growth);
+    const good = rows.filter((x) => x.share < 0.02).slice(0, 10);
+    const now = rows.filter((x) => x.share >= 0.02).sort((a, b) => b.share - a.share).slice(0, 5);
+    const row = (x: (typeof rows)[number]) => `<div class="where-row">
+        ${this.stars(x.f.stars)}
+        <div class="wr-name"><b>${x.r.name}</b><small>${x.f.notes.join(' · ') || 'nothing stands in its way'}${x.share >= 0.02 ? ` · ${Math.round(x.share * 100)}% of them live here` : ''}</small></div>
+        <button class="secondary" data-fly="${x.r.id}">🔭 Look</button>
+        ${x.share < 0.5 && x.f.stars >= 1 ? `<button class="secondary" data-bring="${x.r.id}" data-cell="${x.f.bestCell}">🕊️ Bring (${sim.price(20)}⚡)</button>` : '<span></span>'}
+      </div>`;
+    const m = this.openModal(
+      `<div class="card wide">
+        <div class="stat-head"><img src="${this.picture(sp)}" alt="" /><div><h2>🧭 Where could <i>${sp.name}</i> thrive?</h2><div class="sub">Every region scored for a band of newcomers: climate, food, rivals and hunters, as things stand now. ★★★ or more means they should take hold.</div></div><button class="secondary" id="close">Close</button></div>
+        <h3>Best new homes</h3>${good.map(row).join('') || '<div class="site-empty">Nowhere new would welcome it right now.</div>'}
+        <h3>Where it lives now</h3>${now.map(row).join('') || '<div class="site-empty">Too few to call any region home.</div>'}
+      </div>`,
+      true,
+    );
+    m.querySelector('#close')!.addEventListener('click', () => this.forceClose());
+    m.querySelectorAll<HTMLElement>('[data-fly]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const r = sim.regions[Number(b.dataset.fly)];
+        this.forceClose();
+        const c = this.regionCentre(r.cells[0]);
+        g.setPlace(c, -1);
+        g.focus(c, 4);
+      }),
+    );
+    m.querySelectorAll<HTMLElement>('[data-bring]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const cell = Number(b.dataset.cell);
+        const res = usePower(sim, 'transplant', cell, sp);
+        this.toast(res.ok ? `A band of ${sp.name} is set down in ${sim.regions[Number(b.dataset.bring)].name}.` : res.msg, !res.ok);
+        if (res.ok) {
+          this.forceClose();
+          g.setPlace(cell, -1);
+          g.focus(cell, 5);
+        }
+      }),
+    );
+  }
+
+  /** Design a mutant, see how it would fare against its parent across the world, and choose where it starts. */
+  showLab(sp: Species): void {
+    const g = this.game;
+    const sim = g.sim;
+    const orig = sp.genome;
+    const draft: Genome = { ...orig };
+    const cache = new Map<number, ReturnType<Sim['community']>>();
+    const homeCell = sim.densestCell(sp);
+    const homeRegion = sim.regions[sim.regionOf[Math.max(0, homeCell)]];
+    let release = homeRegion.id;
+    let shelter = true;
+    const parentF = new Map<number, Forecast>();
+    for (const r of sim.regions) parentF.set(r.id, sim.forecast(orig, r.cells, sp, 5, cache));
+    type Key = GuideKey | 'tempOpt' | 'moistOpt';
+    const STEP: Partial<Record<Key, number>> = { size: 0.5, tempOpt: 3, moistOpt: 0.08 };
+    const keys: Key[] = ['size', ...TRAIT_KEYS.filter((k) => traitCap(orig, k) > 0 || orig[k] > 0.01), 'tempOpt'];
+    if (orig.habitat !== 'aquatic') keys.push('moistOpt');
+    const labelOf = (k: Key) => (k === 'tempOpt' ? { icon: '🌡️', label: 'Prefers warmth' } : k === 'moistOpt' ? { icon: '💧', label: 'Prefers rain' } : traitInfo(draft, k));
+    const fmt = (k: Key, v: number) => (k === 'tempOpt' ? `${Math.round(v)} °C` : k === 'moistOpt' ? `${Math.round(v * 100)}%` : k === 'size' ? formatMass(v) : `${Math.round(v * 100)}`);
+    const frac = (k: Key, v: number) => (k === 'tempOpt' ? (v + 25) / 95 : k === 'size' ? v / 10 : v);
+    const steps = () => keys.reduce((s, k) => s + Math.round(Math.abs(draft[k] - orig[k]) / (STEP[k] ?? 0.1)), 0);
+    const cost = () => sim.price(GUIDE_COST + 6 * Math.max(0, steps() - 1) + (shelter ? 15 : 0));
+
+    const m = this.openModal(
+      `<div class="card wide labcard">
+        <div class="stat-head"><img id="lab-pic" src="${this.picture(sp)}" alt="" /><div><h2>🧪 Mutation lab: <i>${sp.name}</i></h2><div class="sub" id="lab-desc"></div></div><button class="secondary" id="close">Close</button></div>
+        <div class="lab-grid">
+          <div><h3>Change its genes</h3><div id="lab-traits"></div></div>
+          <div><h3>How would it fare?</h3><div id="lab-fore"></div></div>
+        </div>
+        <div class="lab-foot">
+          <label><input type="checkbox" id="lab-shelter" checked /> Shelter it for 60 steps: nothing may eat it and rivals press it less while it settles</label>
+          <span id="lab-where"></span>
+          <button class="primary" id="lab-go"></button>
+        </div>
+      </div>`,
+      true,
+    );
+    const draw = () => {
+      sanitize(draft);
+      const d = describe(draft);
+      m.querySelector('#lab-desc')!.innerHTML = steps() ? `The mutant would be: <b>${d.icon} ${d.desc}</b> · ${steps()} change${steps() > 1 ? 's' : ''}` : 'Use − and + to change its genes. Several changes can go into one mutant.';
+      (m.querySelector('#lab-pic') as HTMLImageElement).src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(portrait(draft, sp.hue, sp.id + 1))}`;
+      m.querySelector('#lab-traits')!.innerHTML = keys
+        .map((k) => {
+          const L = labelOf(k);
+          const a = frac(k, orig[k]);
+          const b = frac(k, draft[k]);
+          const changed = Math.abs(draft[k] - orig[k]) > 1e-6;
+          return `<div class="lab-row${changed ? ' changed' : ''}"><span>${L.icon}</span><span>${L.label}</span>
+            <span class="lab-bar"><span class="was" style="width:${Math.max(0, Math.min(1, a)) * 100}%"></span><span class="now" style="width:${Math.max(0, Math.min(1, b)) * 100}%"></span></span>
+            <span class="lab-val">${fmt(k, draft[k])}</span>
+            <button data-k="${k}" data-d="-1">−</button><button data-k="${k}" data-d="1">+</button></div>`;
+        })
+        .join('');
+      // forecasts for the mutant everywhere, compared with its parent (which is its closest rival)
+      const rows = sim.regions
+        .map((r) => ({ r, p: parentF.get(r.id)!, f: steps() ? sim.forecast(draft, r.cells, null, 5, cache) : parentF.get(r.id)! }))
+        .filter((x) => x.f.habitable > 0 || x.r.id === homeRegion.id);
+      const home = rows.find((x) => x.r.id === homeRegion.id)!;
+      const best = rows.filter((x) => x.r.id !== homeRegion.id).sort((a, b) => b.f.growth - a.f.growth).slice(0, 6);
+      const line = (x: (typeof rows)[number], tag: string) => `<div class="lab-fore-row${release === x.r.id ? ' on' : ''}" data-rel="${x.r.id}">
+          <div class="wr-name"><b>${tag}${x.r.name}</b><small>${x.f.notes.join(' · ') || 'nothing stands in its way'}</small></div>
+          <span title="The parent species">${this.stars(x.p.stars)}</span><span>→</span><span title="The mutant">${this.stars(x.f.stars)}</span>
+        </div>`;
+      m.querySelector('#lab-fore')!.innerHTML = `<div class="lab-legend"><span>parent</span><span>mutant</span></div>${line(home, '🏠 ')}<div class="site-head">Best places for the mutant · click to release it there</div>${best.map((x) => line(x, '')).join('')}`;
+      m.querySelector('#lab-where')!.textContent = `Release in ${sim.regions[release].name}`;
+      const btn = m.querySelector<HTMLButtonElement>('#lab-go')!;
+      btn.textContent = `Create the mutant (${cost()}⚡)`;
+      btn.disabled = steps() === 0 || !(sim.sandbox || sim.energy >= cost());
+      m.querySelectorAll<HTMLElement>('[data-rel]').forEach((r) =>
+        r.addEventListener('click', () => {
+          release = Number(r.dataset.rel);
+          draw();
+        }),
+      );
+    };
+    m.querySelector('#lab-traits')!.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-k]');
+      if (!b) return;
+      const k = b.dataset.k as Key;
+      draft[k] += Number(b.dataset.d) * (STEP[k] ?? 0.1);
+      this.game.sound.play('click');
+      draw();
+    });
+    m.querySelector('#lab-shelter')!.addEventListener('change', (e) => {
+      shelter = (e.target as HTMLInputElement).checked;
+      draw();
+    });
+    m.querySelector('#close')!.addEventListener('click', () => this.forceClose());
+    m.querySelector('#lab-go')!.addEventListener('click', () => {
+      const price = cost();
+      if (!sim.sandbox && sim.energy < price) return this.toast('Not enough divine energy.', true);
+      const r = sim.regions[release];
+      const fc = sim.forecast(draft, r.cells, null, 10, cache);
+      const cell = fc.bestCell >= 0 ? fc.bestCell : r.cells.find((c) => habFactors(draft)[sim.world.cls[c]] > 0.02) ?? -1;
+      if (cell < 0) return this.toast('The mutant could not live anywhere in that region.', true);
+      const child = sim.createMutant(sp, { ...draft }, cell, shelter ? 60 : 0);
+      if (!child) return this.toast('The world has no room for another species right now.', true);
+      if (!sim.sandbox) sim.energy -= price;
+      const changes = keys.filter((k) => Math.abs(draft[k] - orig[k]) > 1e-6).map((k) => `${draft[k] > orig[k] ? 'more' : 'less'} ${labelOf(k).label.toLowerCase()}`);
+      sim.log('🧬', `In your laboratory ${sp.name} gives rise to ${child.name} (${changes.join(', ')}), released in ${r.name}${shelter ? ' under your protection' : ''}.`, { speciesId: child.id, cell });
+      this.forceClose();
+      g.select(child.id);
+      g.setFollow(child.id);
+    });
+    draw();
   }
 
   // -------------------------------------------------------------------------

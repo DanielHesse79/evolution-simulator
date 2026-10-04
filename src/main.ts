@@ -39,6 +39,9 @@ class App implements Game {
   private heardEvents = 0;
   private mixFrame = 0;
   place: { cell: number; radius: number } | null = null;
+  followId = -1;
+  showRegions = true;
+  private followFrame = 0;
 
   constructor() {
     this.ui = new UI(this);
@@ -84,6 +87,7 @@ class App implements Game {
     this.endShown = false;
     this.dirty = true;
     this.place = null;
+    this.followId = -1;
     this.heardEvents = this.sim.events.length;
     this.ui.reset();
     this.ui.setLegend(this.renderer.layer);
@@ -107,8 +111,34 @@ class App implements Game {
   /** Inspect a place on the map: what lives there, and in how wide a circle around it. */
   setPlace(cell: number | null, radius?: number): void {
     if (cell === null || cell < 0) this.place = null;
-    else this.place = { cell, radius: radius ?? this.place?.radius ?? 3 };
+    else this.place = { cell, radius: radius ?? this.place?.radius ?? -1 };
     this.ui.refresh(performance.now(), true);
+  }
+
+  /** Keep the camera on a species as it moves about. */
+  setFollow(id: number): void {
+    this.followId = id;
+    const sp = this.sim.species[id];
+    if (sp?.alive) {
+      const c = this.sim.densestCell(sp);
+      if (c >= 0) this.renderer.flyTo(c, Math.max(this.renderer.zoom, 6));
+    }
+    this.ui.refresh(performance.now(), true);
+  }
+
+  private follow(): void {
+    if (this.followId < 0 || this.followFrame++ % 45 !== 0) return;
+    const sp = this.sim.species[this.followId];
+    if (!sp?.alive) {
+      this.followId = -1;
+      return;
+    }
+    const c = this.sim.densestCell(sp);
+    if (c < 0) return;
+    const r = this.renderer;
+    const dx = Math.abs((c % W) + 0.5 - r.cx);
+    const dy = Math.abs(Math.floor(c / W) + 0.5 - r.cy);
+    if (dx > (W / r.zoom) * 0.22 || dy > (H / r.zoom) * 0.22) r.flyTo(c, r.zoom);
   }
 
   /** Step to one of the fixed zoom levels, centred on the inspected place if there is one. */
@@ -215,6 +245,7 @@ class App implements Game {
         e.preventDefault();
         const dy = e.deltaMode === 1 ? e.deltaY * 30 : e.deltaY;
         this.renderer.zoomAt(Math.exp(-dy * 0.0016), e.clientX, e.clientY);
+        this.followId = -1;
       },
       { passive: false },
     );
@@ -228,7 +259,10 @@ class App implements Game {
           over.classList.add('panning');
           $('tooltip').style.display = 'none';
         }
-        if (d.moved) this.renderer.panBy(e.clientX - d.lastX, e.clientY - d.lastY);
+        if (d.moved) {
+          this.renderer.panBy(e.clientX - d.lastX, e.clientY - d.lastY);
+          this.followId = -1;
+        }
         d.lastX = e.clientX;
         d.lastY = e.clientY;
         if (d.moved) return;
@@ -427,6 +461,7 @@ class App implements Game {
         toolColor: DESTRUCTIVE.includes(this.tool) ? 'rgba(239, 100, 97, 0.95)' : 'rgba(242, 193, 78, 0.95)',
         selected: sim.species[this.selectedId] ?? null,
         place: this.place,
+        regions: this.showRegions || (this.place?.radius ?? 0) < 0 ? { borders: this.showRegions, selected: this.place && this.place.radius < 0 ? sim.regionOf[this.place.cell] : -1 } : null,
         showLabels: true,
       });
       this.ui.refresh(now);
@@ -436,6 +471,7 @@ class App implements Game {
         this.ui.showEnd();
       }
       this.tutorial.update(now);
+      this.follow();
       this.listen();
     }
     requestAnimationFrame((t) => this.frame(t));

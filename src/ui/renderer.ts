@@ -150,6 +150,7 @@ export interface OverlayState {
   selected: Species | null;
   showLabels: boolean;
   place?: { cell: number; radius: number } | null;
+  regions?: { borders: boolean; selected: number } | null;
 }
 
 /** Paints the world: a detailed base map from the simulation grid, plus a live overlay. */
@@ -183,6 +184,8 @@ export class MapRenderer {
   private rangeImg: ImageData;
   private rangeKey = '';
   private effectStart = new Map<number, number>();
+  /** Region borders as segments [x1, y1, x2, y2, regionA, regionB] in cell units. */
+  private borders: number[] = [];
 
   constructor(
     private map: HTMLCanvasElement,
@@ -202,6 +205,17 @@ export class MapRenderer {
     this.rangeCanvas.height = H;
     this.rangeCtx = this.rangeCanvas.getContext('2d')!;
     this.rangeImg = this.rangeCtx.createImageData(W, H);
+
+    // the borders between regions, found once
+    const ro = sim.regionOf;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const c = y * W + x;
+        const e = y * W + ((x + 1) % W);
+        if (ro[e] !== ro[c]) this.borders.push(x + 1, y, x + 1, y + 1, ro[c], ro[e]);
+        if (y < H - 1 && ro[c + W] !== ro[c]) this.borders.push(x, y + 1, x + 1, y + 1, ro[c], ro[c + W]);
+      }
+    }
 
     // high-resolution relief: the simulation grid is coarse, but the coastline need not look it
     const { DW, DH } = this;
@@ -725,8 +739,58 @@ export class MapRenderer {
     }
     if (this.effectStart.size > 200) this.effectStart.clear();
 
+    // regions: faint borders, names when close enough, and the inspected one lit up
+    if (st.regions) {
+      const sel = st.regions.selected;
+      ctx.setTransform(k, 0, 0, ky, -x0 * k, -y0 * ky);
+      if (sel >= 0) {
+        ctx.fillStyle = 'rgba(79, 209, 197, 0.13)';
+        for (const c of sim.regions[sel].cells) ctx.fillRect(c % W, Math.floor(c / W), 1, 1);
+      }
+      const b = this.borders;
+      if (st.regions.borders) {
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+        ctx.lineWidth = (1.1 * dpr) / k;
+        ctx.beginPath();
+        for (let i = 0; i < b.length; i += 6) {
+          ctx.moveTo(b[i], b[i + 1]);
+          ctx.lineTo(b[i + 2], b[i + 3]);
+        }
+        ctx.stroke();
+      }
+      if (sel >= 0) {
+        ctx.strokeStyle = 'rgba(79, 209, 197, 0.95)';
+        ctx.lineWidth = (2.2 * dpr) / k;
+        ctx.beginPath();
+        for (let i = 0; i < b.length; i += 6) {
+          if (b[i + 4] !== sel && b[i + 5] !== sel) continue;
+          ctx.moveTo(b[i], b[i + 1]);
+          ctx.lineTo(b[i + 2], b[i + 3]);
+        }
+        ctx.stroke();
+      }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      if (st.regions.borders && this.zoom >= 1.8) {
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const a = Math.min(1, (this.zoom - 1.8) / 0.8);
+        for (const r of sim.regions) {
+          if (r.water && this.zoom < 2.6) continue;
+          const lx = sx(r.cx);
+          const ly = sy(r.cy);
+          if (lx < -80 || lx > cw + 80 || ly < -20 || ly > ch + 20) continue;
+          const size = (r.water ? 10.5 : 11.5) * dpr;
+          ctx.font = (r.water ? 'italic ' : '') + '600 ' + size + 'px "Segoe UI", system-ui, sans-serif';
+          ctx.fillStyle = 'rgba(0,0,0,' + 0.45 * a + ')';
+          ctx.fillText(r.name, lx + dpr, ly + dpr);
+          ctx.fillStyle = r.id === sel ? 'rgba(120,240,225,' + a + ')' : r.water ? 'rgba(190,225,255,' + 0.75 * a + ')' : 'rgba(255,255,255,' + 0.8 * a + ')';
+          ctx.fillText(r.name, lx, ly);
+        }
+      }
+    }
+
     // the inspected place
-    if (st.place) {
+    if (st.place && st.place.radius >= 0) {
       const px = sx((st.place.cell % W) + 0.5);
       const py = sy(Math.floor(st.place.cell / W) + 0.5);
       ctx.lineWidth = 2 * dpr;

@@ -700,7 +700,7 @@ export class Sim {
   /** Rare leaps: flyers crossing straits, castaways on driftwood, spores on the wind. */
   private longDistanceDispersal(): void {
     const w = this.world;
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0; i < 48; i++) {
       const c = this.rng.int(N);
       const base = c * MAXS;
       for (let k = 0; k < this.nAlive; k++) {
@@ -780,7 +780,7 @@ export class Sim {
           continue;
         }
       } else sp.lowTicks = 0;
-      if ((this.tick + sp.id * 7) % 40 === 0 && age > 20) this.adaptInPlace(sp);
+      if ((this.tick + sp.id * 7) % 30 === 0 && age > 20) this.adaptInPlace(sp);
       if (!sp.established && age >= 15 && sp.cells >= 4) {
         sp.established = true;
         this.onEstablished(sp);
@@ -842,14 +842,42 @@ export class Sim {
     }
     if (sum <= 0) return;
     const g = sp.genome;
+
+    // the frontier: places of the right kind just beyond where it lives. Those living at the edge
+    // breed with the rest, so the whole species is slowly pulled towards the climate it is reaching.
+    let ft = 0;
+    let fm = 0;
+    let fn = 0;
+    let fland = 0;
+    for (let i = 0; i < 40; i++) {
+      const c = this.randomOccupiedCell(sp);
+      if (c < 0) break;
+      const nc = w.nb[c * 4 + this.rng.int(4)];
+      if (nc < 0 || this.pop[nc * MAXS + s] > MINP * 5 || this.hab[s * 4 + w.cls[nc]] <= 0.02) continue;
+      ft += w.temp[nc];
+      fn++;
+      if (!w.isWater[nc]) {
+        fm += w.moist[nc];
+        fland++;
+      }
+    }
+    const coreT = st / sum;
+    const coreM = land > 0 ? sm / land : g.moistOpt;
+    const edge = fn >= 4 ? 0.35 : 0;
+    const targetT = coreT * (1 - edge) + (fn ? ft / fn : coreT) * edge;
+    const targetM = coreM * (1 - edge) + (fland ? fm / fland : coreM) * edge;
     const k = 0.25;
-    const dT = (st / sum - g.tempOpt) * k;
+    const dT = (targetT - g.tempOpt) * k;
     const dPh = (sph / sum - g.phOpt) * k;
-    const dM = land > 0 ? (sm / land - g.moistOpt) * k : 0;
-    if (Math.abs(dT) < 0.15 && Math.abs(dPh) < 0.03 && Math.abs(dM) < 0.01) return;
+    const dM = land > 0 ? (targetM - g.moistOpt) * k : 0;
+    // a frontier in a different climate slowly breeds a hardier, more tolerant species
+    const gap = fn ? Math.abs(ft / fn - g.tempOpt) : 0;
+    const widen = gap > g.tempTol * 0.6 && g.tempTol < 15 ? 0.25 : 0;
+    if (Math.abs(dT) < 0.15 && Math.abs(dPh) < 0.03 && Math.abs(dM) < 0.01 && !widen) return;
     g.tempOpt += dT;
     g.phOpt += dPh;
     g.moistOpt += dM;
+    g.tempTol += widen;
     this.refreshSpecies(sp);
   }
 
@@ -901,8 +929,10 @@ export class Sim {
         }
       }
       if (!frontier && this.rng.chance(0.35)) {
-        // or the edge of its range: drier, colder or saltier ground of the same kind that it has not won yet
-        for (let tries = 0; tries < 16 && !frontier; tries++) {
+        // or the edge of its range: drier, colder or saltier ground of the same kind that it has not won
+        // yet. Of a few such places, the one whose climate differs most from its own is tried.
+        let bestGap = -1;
+        for (let tries = 0; tries < 24; tries++) {
           const c = this.randomOccupiedCell(parent);
           if (c < 0) break;
           const y = Math.floor(c / W) + this.rng.int(7) - 3;
@@ -910,9 +940,13 @@ export class Sim {
           if (y < 0 || y >= H) continue;
           const nc = y * W + x;
           if (this.hab[parent.slot * 4 + w.cls[nc]] > 0.02 && this.pop[nc * MAXS + parent.slot] < MINP * 5) {
-            seed = c;
-            target = nc;
-            frontier = true;
+            const gap = Math.abs(w.temp[nc] - parent.genome.tempOpt) + (w.isWater[nc] ? 0 : 20 * Math.abs(w.moist[nc] - parent.genome.moistOpt));
+            if (gap > bestGap) {
+              bestGap = gap;
+              seed = c;
+              target = nc;
+              frontier = true;
+            }
           }
         }
       }
@@ -1953,7 +1987,8 @@ function sameGrowthForm(a: Species, b: Species): boolean {
 /** Species that compete for the same living. Trees and the grass beneath them are different trades. */
 function guildKey(g: Genome): string {
   const form = isAuto(g) ? (g.size > 4.95 ? '|tall' : '|low') : '';
-  return `${g.tier}|${g.diet}|${g.habitat}${form}`;
+  const zone = g.tempOpt < 4 ? '|cold' : g.tempOpt < 18 ? '|mild' : '|warm';
+  return `${g.tier}|${g.diet}|${g.habitat}${form}${zone}`;
 }
 
 function cap(s: string): string {

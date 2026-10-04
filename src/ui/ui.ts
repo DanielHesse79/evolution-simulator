@@ -667,7 +667,8 @@ export class UI {
         <ul>
           <li><b>Zoom:</b> scroll over the map (or ＋ / −, or the buttons in its corner) and drag to move. Up close you see waves, drifting algae, kelp, forests, mountains, volcanoes and the animals themselves. <b>0</b> shows the whole world again; <b>📍 Locate</b> flies to a species.</li>
           <li><b>Cells:</b> press <b>🔬 Cell</b> on any species to see how its cells are built and which kinds of cells make up its body.</li>
-          <li><b>Places:</b> click the map to see everything living in a spot, an area or a whole region, and the climate there.</li>
+          <li><b>Regions:</b> click the map to inspect the named region there: its forests and grassland, its plant-eaters, hunters and plants, its climate, and how well your selected species would do there. Area and Spot look closer.</li>
+          <li><b>Mutants:</b> <b>🧭 Where to?</b> ranks every region for a species. The <b>🧪 Lab</b> designs a mutant with several changes, compares it with its parent region by region and releases it where you choose, sheltered while it settles. <b>🎥 Follow</b> keeps the camera on a species.</li>
           <li><b>Stats:</b> press <b>📊 Stats</b> on a species to see how it spread, what killed it, what ate it and what it ate. When a species dies out, the Chronicle tells you why.</li>
           <li><b>Field guide (📖)</b> has a picture of every species, living and extinct. <b>🔊</b> switches between sound with music, effects only, and silence.</li>
         </ul>

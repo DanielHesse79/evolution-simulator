@@ -93,7 +93,7 @@ export function derive(g: Genome): Derived {
   let disp: number;
   if (g.tier <= 1) disp = 0.15;
   else if (g.habitat === 'aquatic') disp = auto ? 0.08 : 0.1 + 0.08 * g.speed;
-  else if (auto) disp = 0.03 + 0.07 * g.fertility + (g.tier >= 4 ? 0.04 : 0);
+  else if (auto) disp = 0.05 + 0.08 * g.fertility + (g.tier >= 4 ? 0.04 : 0);
   else disp = 0.04 + 0.1 * speedEff + 0.12 * g.flight + 0.03 * g.fertility;
 
   const synergy = 0.5 * g.social + 0.5 * g.grasp;

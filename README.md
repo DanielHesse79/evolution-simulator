@@ -32,6 +32,16 @@ Then open http://localhost:5173. `npm run build` produces a static site in `dist
 - **Inspect a place**: click the map to open the place inspector: the climate there and every
   species living in a spot, an area or a whole region around it, each with its picture. The
   **World / Region / Landscape / Close-up** buttons at the foot of the map fly there step by step.
+- **Regions**: the world is divided into named regions ("Southern Thalea Steppe", "The Dusk Ocean"),
+  outlined on the map. Inspecting a region shows its forest and grassland, plant-eaters, hunters,
+  plants and climate, and how well the selected species would do there.
+- **Where to? and the Mutation lab**: rank every region for a species, or design a mutant with
+  several changes (traits, preferred warmth and rain), compare it with its parent region by region,
+  choose where to release it and shelter it while it settles. Mutants you make are never culled to
+  make room for others. **🎥 Follow** keeps the camera on a species.
+- **Plant traits**: Height, Roots (Holdfast in the sea), Thorns & bark, Toxins, Frost hardiness and
+  Seeds. Species slowly adapt towards the climate at the edge of their range, so forests spread
+  from the poles to the tropics.
 - **Pictures**: every species gets a portrait generated from its genes (body plan, horns, fur,
   armour, wings, warning colours, company), shown in the lists and in the **📖 Field guide**.
 - **Stats and causes of death**: **📊 Stats** shows how a species spread (numbers, range and the
@@ -80,6 +90,7 @@ cools the planet, so a blooming biosphere can tip the world into an ice age.
 | `src/sim/genome.ts` | Genome, mutation, environmental responses, naming |
 | `src/sim/species.ts` | Derived stats and species interactions |
 | `src/sim/simulation.ts` | The step loop: populations, speciation, atmosphere, disasters, goals |
+| `src/sim/regions.ts` | Named regions of land and sea |
 | `src/sim/powers.ts` | The player's divine powers |
 | `src/ui/renderer.ts` | Map painting, zoom/pan and the close-up landscape |
 | `src/ui/cell.ts` | Generated cell drawings and cell-type descriptions |
@@ -89,6 +100,8 @@ cools the planet, so a blooming biosphere can tip the world into an ice age.
 | `src/ui/` (rest) | Panels, tree of life |
 | `scripts/headless.ts` | Run a world without the UI (`npm run sim -- <seed> <steps>`) for balancing |
 | `scripts/survey.ts` | Milestone timing across several seeds |
+| `scripts/trees.ts`, `scripts/treespread.ts` | Which trees exist, and how fast they radiate across climates |
+| `scripts/mutants.ts` | How long player-made mutants survive |
 | `scripts/biomes.ts` | Share of each landscape type and ground plant after a full run |
 
 Play it online: https://danielhesse79.github.io/evolution-simulator/ (deployed from `main` by

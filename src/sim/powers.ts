@@ -44,7 +44,7 @@ export function usePower(sim: Sim, id: PowerId, cell: number, selected: Species 
   const info = POWERS.find((p) => p.id === id)!;
   const w = sim.world;
   if (id === 'inspect') return { ok: true, msg: '' };
-  if (!sim.canAfford(info.cost)) return fail(`Not enough divine energy (${info.cost} needed).`);
+  if (!sim.canAfford(info.cost)) return fail(`Not enough divine energy (${sim.price(info.cost)} needed).`);
   const where = w.isWater[cell] ? 'the sea' : w.continentName(cell);
 
   switch (id) {
@@ -171,7 +171,7 @@ export function guideEvolution(sim: Sim, sp: Species, key: GuideKey, dir: 1 | -1
     return fail('A mind cannot grow alone. Give this creature grasping limbs and a social life first.');
   }
   if (!canGuide(sp, key, dir)) return fail(key === 'size' ? 'This body plan cannot change size any further.' : `This body plan cannot ${dir > 0 ? 'develop' : 'reduce'} ${TRAIT_INFO[key].label.toLowerCase()} any further.`);
-  if (!sim.canAfford(GUIDE_COST)) return fail(`Not enough divine energy (${GUIDE_COST} needed).`);
+  if (!sim.canAfford(GUIDE_COST)) return fail(`Not enough divine energy (${sim.price(GUIDE_COST)} needed).`);
   const cell = sim.densestCell(sp);
   if (cell < 0) return fail('The species is too scattered.');
   const child = sim.trySpeciate(sp, {

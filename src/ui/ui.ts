@@ -1,6 +1,6 @@
 import { DIET_NAMES, HABITAT_NAMES, TIER_NAMES, TRAIT_INFO, TRAIT_KEYS, formatHeadcount, formatMass, traitCap, type Kind } from '../sim/genome';
 import { GUIDE_COST, POWERS, canGuide, guideEvolution, usePower, type GuideKey, type PowerId } from '../sim/powers';
-import { GOALS, MAXS, MAX_ENERGY, Sim, TOTAL_TICKS, yearAt, type AtmKey, type GoalId } from '../sim/simulation';
+import { DIFFICULTIES, GOALS, HIST_EVERY, MAXS, MAX_ENERGY, Sim, TOTAL_TICKS, yearAt, type AtmKey, type DifficultyId, type GoalId } from '../sim/simulation';
 import type { Genome } from '../sim/genome';
 import type { Species } from '../sim/species';
 import { CELL_EXAMPLES, buildCell } from './cell';
@@ -24,7 +24,7 @@ export interface Game {
   setTool(id: PowerId): void;
   setSpeed(i: number): void;
   setLayer(l: Layer): void;
-  start(seed: number, goal: GoalId, tutorial: boolean): void;
+  start(seed: number, goal: GoalId, tutorial: boolean, difficulty: DifficultyId): void;
   startTutorial(): void;
   focus(cell: number, zoom?: number): void;
   /** The place being inspected on the map, and how far around it to look. */
@@ -32,6 +32,7 @@ export interface Game {
   setPlace(cell: number | null, radius?: number): void;
   goTo(zoom: number): void;
   markDirty(): void;
+  sound: { play(name: string): void };
 }
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -196,7 +197,7 @@ export class UI {
       : `<div class="lbl"><span>⚡ Divine energy</span><b>${Math.floor(sim.energy)}</b></div><div class="meter"><div style="width:${(sim.energy / MAX_ENERGY) * 100}%"></div></div>`;
     const goal = GOALS.find((x) => x.id === sim.goal)!;
     const prog = sim.goalProgress();
-    $('goal').innerHTML = `<div class="lbl"><span>${goal.icon} ${goal.name}</span><span>${prog.label}</span></div><div class="meter"><div style="width:${prog.value * 100}%"></div></div>`;
+    $('goal').innerHTML = `<div class="lbl"><span>${goal.icon} ${goal.name}${sim.sandbox ? '' : ` · ${sim.diff.name}`}</span><span>${prog.label}</span></div><div class="meter"><div style="width:${prog.value * 100}%"></div></div>`;
     $('goal').title = goal.blurb;
 
     // powers
@@ -208,6 +209,14 @@ export class UI {
         b.classList.toggle('poor', !sim.canAfford(p.cost));
       });
     this.renderPowerHint();
+    $('powers')
+      .querySelectorAll<HTMLElement>('[data-power]')
+      .forEach((b) => {
+        const p = POWERS.find((x) => x.id === b.dataset.power)!;
+        const pc = b.querySelector('.pc')!;
+        const text = p.cost ? `${sim.sandbox ? 0 : sim.price(p.cost)}⚡` : '\u00a0';
+        if (pc.textContent !== text) pc.textContent = text;
+      });
 
     // layers
     $('layers')
@@ -233,7 +242,8 @@ export class UI {
   private renderPowerHint(): void {
     const id = this.hoverPower ?? this.game.tool;
     const p = POWERS.find((x) => x.id === id)!;
-    $('powerhint').innerHTML = `<b>${p.icon} ${p.name}</b>${p.cost ? ` · ${p.cost}⚡` : ''}<br>${p.hint}`;
+    const price = this.game.sim ? this.game.sim.price(p.cost) : p.cost;
+    $('powerhint').innerHTML = `<b>${p.icon} ${p.name}</b>${p.cost ? ` · ${price}⚡` : ''}<br>${p.hint}`;
   }
 
   private renderAtmosphere(): void {
@@ -355,7 +365,11 @@ export class UI {
     if (sp.alive) {
       facts.push(['Numbers', `${formatHeadcount(sp.totalPop, gn.size)}`]);
       facts.push(['Range', this.rangeText(sp)]);
-    } else facts.push(['Vanished', `year ${num(sp.diedYear)}`]);
+      if (sp.declineReason && sp.totalPop < 0.55 * sp.peakPop) facts.push(['Declining', `<span class="warn">⚠ ${sp.declineReason}</span>`]);
+    } else {
+      facts.push(['Vanished', `year ${num(sp.diedYear)}`]);
+      if (sp.deathCause) facts.push(['Why', `<span class="warn">${sp.deathCause}</span>`]);
+    }
     facts.push(['Body', `about ${formatMass(gn.size)}`]);
     let comfort = `${Math.round(gn.tempOpt - gn.tempTol)} to ${Math.round(gn.tempOpt + gn.tempTol)} °C · pH ${(gn.phOpt - gn.phTol).toFixed(1)}–${(gn.phOpt + gn.phTol).toFixed(1)}`;
     if (gn.habitat !== 'aquatic') comfort += ` · rain ${Math.round(Math.max(0, gn.moistOpt - gn.moistTol) * 100)}–${Math.round(Math.min(1, gn.moistOpt + gn.moistTol) * 100)} %`;
@@ -364,7 +378,7 @@ export class UI {
     const rows: string[] = [];
     const traitRow = (key: GuideKey, icon: string, label: string, hint: string, frac: number) => {
       const open = (dir: 1 | -1) => sp.alive && (canGuide(sp, key, dir) || (key === 'intel' && dir > 0 && gn.tier === 4 && gn.intel < 0.98));
-      const btn = (dir: 1 | -1) => `<button data-guide="${key}" data-dir="${dir}" ${open(dir) ? '' : 'disabled'} title="Guide evolution: ${dir > 0 ? 'more' : 'less'} (${GUIDE_COST}⚡)">${dir > 0 ? '+' : '−'}</button>`;
+      const btn = (dir: 1 | -1) => `<button data-guide="${key}" data-dir="${dir}" ${open(dir) ? '' : 'disabled'} title="Guide evolution: ${dir > 0 ? 'more' : 'less'} (${g.sim.price(GUIDE_COST)}⚡)">${dir > 0 ? '+' : '−'}</button>`;
       rows.push(`<div class="trait" title="${hint}"><span>${icon}</span><span>${label}</span><span class="tb"><span style="width:${Math.round(frac * 100)}%"></span></span>${btn(-1)}${btn(1)}</div>`);
     };
     traitRow('size', '⚖️', 'Body size', 'Bigger bodies escape small predators and overtop rivals, but breed slowly and need more oxygen and water.', gn.size / 10);
@@ -387,11 +401,12 @@ export class UI {
       <div class="d-facts">${facts.map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join('')}</div>
       ${this.sparkline(sp)}
       <div class="traits">${rows.join('')}</div>
-      ${sp.alive ? `<div class="guide-note">＋/− guides evolution: a daughter species with the change is born (${GUIDE_COST}⚡). Selection decides whether she lasts.</div>` : ''}
+      ${sp.alive ? `<div class="guide-note">＋/− guides evolution: a daughter species with the change is born (${sim.price(GUIDE_COST)}⚡). Selection decides whether she lasts.</div>` : ''}
       <div class="d-actions">
         ${sp.alive ? '<button data-act="locate" title="Fly to where it is most numerous and zoom in">📍 Locate</button>' : ''}
+        <button data-act="stats" title="How it spread, what killed it, what ate it and what it ate">📊 Stats</button>
         <button data-act="cell" title="See how its cells are built">🔬 Cell</button>
-        ${sp.alive ? '<button data-act="plague" title="Unleash a virus where it is most numerous (25⚡)">🦠 Plague</button><button data-act="ark" title="Carry a founding population elsewhere (20⚡)">🕊️ Ark</button>' : ''}
+        ${sp.alive ? `<button data-act="plague" title="Unleash a virus where it is most numerous (${sim.price(25)}⚡)">🦠 Plague</button><button data-act="ark" title="Carry a founding population elsewhere (${sim.price(20)}⚡)">🕊️ Ark</button>` : ''}
       </div>`;
   }
 
@@ -417,7 +432,10 @@ export class UI {
     if (!act) return;
     if (act === 'close') g.select(-1);
     else if (act === 'guide') this.showGuide();
-    else if (act === 'cell' && sp) {
+    else if (act === 'stats' && sp) {
+      this.showStats(sp);
+      return;
+    } else if (act === 'cell' && sp) {
       this.showCell(sp.genome, sp.name, sp.desc, sp.id);
       return;
     } else if (!sp?.alive) return;
@@ -472,6 +490,7 @@ export class UI {
   // -------------------------------------------------------------------------
 
   toast(msg: string, bad = false): void {
+    if (bad) this.game.sound.play('error');
     if (!msg) return;
     const el = document.createElement('div');
     el.className = `toast${bad ? ' bad' : ''}`;
@@ -511,6 +530,7 @@ export class UI {
 
   showStart(): void {
     const hasWorld = !!this.game.sim;
+    let diff: DifficultyId = 'normal';
     let goal: GoalId = 'awakening';
     const m = this.openModal(
       `<div class="card">
@@ -522,6 +542,8 @@ export class UI {
         <h3>Choose your purpose</h3>
         <div class="goals">${GOALS.map((x) => `<button class="goalcard${x.id === goal ? ' on' : ''}" data-goal="${x.id}"><span class="gi">${x.icon}</span><div><b>${x.name}</b><span>${x.blurb}</span></div></button>`).join('')}</div>
         <label class="tutrow"><input type="checkbox" id="tut" ${tutorialSeen() ? '' : 'checked'} /> Show me around first (a short guided tour)</label>
+        <h3>Difficulty</h3>
+        <div class="diffs">${DIFFICULTIES.map((d) => `<button class="diffcard${d.id === diff ? ' on' : ''}" data-diff="${d.id}"><b>${d.icon} ${d.name}</b><span>${d.blurb}</span></button>`).join('')}</div>
         <div class="seedrow"><label for="seed">World seed</label><input id="seed" value="${1 + Math.floor(Math.random() * 999999)}" inputmode="numeric" /><button id="reroll" title="Another random world">🎲</button></div>
         <div class="btnrow">
           ${hasWorld ? '<button class="secondary" id="cancel">Back to my world</button>' : ''}
@@ -534,6 +556,12 @@ export class UI {
       b.addEventListener('click', () => {
         goal = b.dataset.goal as GoalId;
         m.querySelectorAll('[data-goal]').forEach((o) => o.classList.toggle('on', o === b));
+      }),
+    );
+    m.querySelectorAll<HTMLElement>('[data-diff]').forEach((btn) =>
+      btn.addEventListener('click', () => {
+        diff = btn.dataset.diff as DifficultyId;
+        m.querySelectorAll('[data-diff]').forEach((o) => o.classList.toggle('on', o === btn));
       }),
     );
     const seed = m.querySelector<HTMLInputElement>('#seed')!;
@@ -549,7 +577,7 @@ export class UI {
       setTimeout(() => {
         this.resumeAfterModal = false;
         this.forceClose();
-        this.game.start(n, goal, tour);
+        this.game.start(n, goal, tour, diff);
       }, 30);
     });
   }
@@ -607,6 +635,9 @@ export class UI {
         <ul>
           <li><b>Zoom:</b> scroll over the map (or ＋ / −, or the buttons in its corner) and drag to move. Up close you see waves, drifting algae, kelp, forests, mountains, volcanoes and the animals themselves. <b>0</b> shows the whole world again; <b>📍 Locate</b> flies to a species.</li>
           <li><b>Cells:</b> press <b>🔬 Cell</b> on any species to see how its cells are built and which kinds of cells make up its body.</li>
+          <li><b>Places:</b> click the map to see everything living in a spot, an area or a whole region, and the climate there.</li>
+          <li><b>Stats:</b> press <b>📊 Stats</b> on a species to see how it spread, what killed it, what ate it and what it ate. When a species dies out, the Chronicle tells you why.</li>
+          <li><b>Field guide (📖)</b> has a picture of every species, living and extinct. <b>🔊</b> switches between sound with music, effects only, and silence.</li>
         </ul>
         <p>Everything costs <b>divine energy</b>, which returns slowly. Time runs fastest in the age of microbes and slows as life grows complex. <b>Space</b> pauses, <b>1–3</b> set the speed, <b>Esc</b> puts your powers down.</p>
         <div class="btnrow"><button class="secondary" id="cells">🔬 Cells compared</button><button class="secondary" id="tour">🧭 Guided tour</button><button class="primary" id="ok">Back to the world</button></div>
@@ -764,6 +795,120 @@ export class UI {
   // The field guide
   // -------------------------------------------------------------------------
 
+  /** The life story of a species in numbers: its spread, its killers, its predators and its diet. */
+  showStats(sp: Species): void {
+    const g = this.game;
+    const sim = g.sim;
+    const gn = sp.genome;
+
+    // growth and spread over time
+    const pop = sp.history;
+    const range = sp.rangeHistory;
+    let chart = '<div class="site-empty">Too young to have a history yet.</div>';
+    if (pop.length >= 3) {
+      const W = 640;
+      const H = 170;
+      const x0 = 46;
+      const x1 = W - 46;
+      const y0 = 12;
+      const y1 = H - 26;
+      const n = pop.length;
+      const maxP = Math.max(...pop, 1e-6);
+      const maxR = Math.max(...range, 1);
+      const X = (i: number) => x0 + ((x1 - x0) * i) / (n - 1);
+      const pts = pop.map((v, i) => `${X(i).toFixed(1)},${(y1 - (v / maxP) * (y1 - y0)).toFixed(1)}`);
+      const rpts = range.map((v, i) => `${X(i).toFixed(1)},${(y1 - (v / maxR) * (y1 - y0)).toFixed(1)}`);
+      const col = `rgb(${sp.color.join(',')})`;
+      let axis = '';
+      for (let k = 0; k <= 4; k++) {
+        const i = Math.round(((n - 1) * k) / 4);
+        const year = yearAt(sp.historyStart + i * HIST_EVERY);
+        axis += `<text x="${X(i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${Math.round(year / 1000).toLocaleString('en-US')}k yr</text><line x1="${X(i).toFixed(1)}" x2="${X(i).toFixed(1)}" y1="${y0}" y2="${y1}" stroke="#ffffff" stroke-opacity="0.06"/>`;
+      }
+      chart = `<svg class="stat-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+        ${axis}
+        <polyline points="${x0},${y1} ${pts.join(' ')} ${x1},${y1}" fill="${col}" fill-opacity="0.22" stroke="none"/>
+        <polyline points="${pts.join(' ')}" fill="none" stroke="${col}" stroke-width="2"/>
+        <polyline points="${rpts.join(' ')}" fill="none" stroke="#4fd1c5" stroke-width="1.6" stroke-dasharray="5 3"/>
+        <text x="${x0 - 6}" y="${y0 + 8}" text-anchor="end">${formatHeadcount(maxP, gn.size)}</text>
+        <text x="${x1 + 6}" y="${y0 + 8}" fill="#4fd1c5">${maxR}</text>
+      </svg>
+      <div class="stat-legend"><span><i style="background:${col}"></i>Numbers (peak ${formatHeadcount(sp.peakPop, gn.size)})</span><span><i class="dash"></i>Range in map squares (each about 250 km across)</span></div>`;
+    }
+    const reached = sp.reached.length
+      ? `<div class="stat-reach">${sp.reached.map((r, i) => `${i ? '→ ' : ''}<b>${r.name}</b> <small>year ${num(r.year)}</small>`).join(' ')}</div>`
+      : gn.habitat === 'aquatic'
+        ? '<div class="stat-reach">Lives in the sea.</div>'
+        : '';
+
+    // what killed them
+    const L = sp.losses;
+    const causes: [string, number, string][] = [
+      ['Eaten by hunters', L.hunted, '#ef6461'],
+      ['Eaten by grazers', L.grazed, '#e8a33a'],
+      ['Hunger, crowding & harsh climate', L.hunger, '#8794b3'],
+      ['Plague', L.plague, '#b55bd1'],
+      ['Fire', L.fire, '#ff8a3a'],
+      ['Volcanoes & impacts', L.disaster, '#c94a2a'],
+    ];
+    const totalLoss = causes.reduce((a, c) => a + c[1], 0);
+    const killed = totalLoss > 0
+      ? `<div class="stat-bar">${causes.filter((c) => c[1] / totalLoss > 0.004).map((c) => `<span style="width:${((c[1] / totalLoss) * 100).toFixed(1)}%;background:${c[2]}" title="${c[0]} ${Math.round((c[1] / totalLoss) * 100)}%"></span>`).join('')}</div>
+        <div class="stat-causes">${causes.filter((c) => c[1] / totalLoss > 0.004).map((c) => `<span><i style="background:${c[2]}"></i>${c[0]} <b>${Math.round((c[1] / totalLoss) * 100)}%</b></span>`).join('')}</div>`
+      : '<div class="site-empty">Nothing has killed any of them yet.</div>';
+    const fate = !sp.alive
+      ? `<p class="stat-fate">💀 Died out in year ${num(sp.diedYear)}: ${sp.deathCause || 'unknown'}.</p>`
+      : sp.declineReason && sp.totalPop < 0.55 * sp.peakPop
+        ? `<p class="stat-fate">⚠ Declining: ${sp.declineReason}.</p>`
+        : '';
+
+    // who ate it, and what it ate
+    const table = (m: Map<number, number>, empty: string) => {
+      const total = [...m.values()].reduce((a, b) => a + b, 0);
+      if (total <= 0) return `<div class="site-empty">${empty}</div>`;
+      return [...m.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 7)
+        .map(([id, v]) => {
+          const o = sim.species[id];
+          const share = v / total;
+          return `<div class="site-sp" data-stat-sp="${id}"><img src="${this.picture(o)}" alt="" /><span class="nm"><i>${o.name}${o.alive ? '' : ' †'}</i><small>${o.desc}</small></span><span class="pct">${share >= 0.01 ? Math.round(share * 100) : '<1'}%</span></div>`;
+        })
+        .join('');
+    };
+    const diet = sp.derived.auto
+      ? `<div class="site-empty">Makes its own food ${gn.diet === 'photo' ? 'from sunlight, water and carbon dioxide' : 'from the minerals of the hot vents'}.</div>`
+      : table(sp.ate, 'It has not eaten anything yet.');
+
+    const m = this.openModal(
+      `<div class="card wide statcard">
+        <div class="stat-head">
+          <img src="${this.picture(sp)}" alt="" />
+          <div><h2><i>${sp.name}</i></h2><div>${sp.desc} · ${TIER_NAMES[gn.tier]} · ${DIET_NAMES[gn.diet]}</div>
+          <div class="sub">${sp.alive ? `${formatHeadcount(sp.totalPop, gn.size)} alive in ${sp.cells} squares` : 'Extinct'} · appeared year ${num(sp.bornYear)}</div></div>
+          <button class="secondary" id="close">Close</button>
+        </div>
+        <h3>Growth and spread</h3>
+        ${chart}${reached}
+        <h3>What killed them</h3>
+        ${fate}${killed}
+        <div class="stat-cols">
+          <div><h3>Eaten by</h3>${table(sp.eatenBy, 'Nothing has eaten it.')}</div>
+          <div><h3>What it ate</h3>${diet}</div>
+        </div>
+      </div>`,
+      true,
+    );
+    m.querySelector('#close')!.addEventListener('click', () => this.forceClose());
+    m.querySelectorAll<HTMLElement>('[data-stat-sp]').forEach((row) =>
+      row.addEventListener('click', () => {
+        const o = sim.species[Number(row.dataset.statSp)];
+        g.select(o.id);
+        this.showStats(o);
+      }),
+    );
+  }
+
   showGuide(): void {
     const g = this.game;
     let tab: Kind | 'extinct' = 'animal';
@@ -799,6 +944,7 @@ export class UI {
               <img src="${this.picture(sp)}" alt="" />
               <i>${sp.name}</i><span>${sp.desc}</span>
               <small>${sp.alive ? `${formatHeadcount(sp.totalPop, sp.genome.size)} · ${formatMass(sp.genome.size)}` : `year ${num(sp.bornYear)} – ${num(sp.diedYear)}`}</small>
+              ${!sp.alive && sp.deathCause ? `<small class="warn">💀 ${sp.deathCause}</small>` : sp.alive && sp.declineReason && sp.totalPop < 0.55 * sp.peakPop ? `<small class="warn">⚠ ${sp.declineReason}</small>` : ''}
             </button>`,
           )
           .join('') || '<div class="site-empty">None.</div>';

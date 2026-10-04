@@ -16,7 +16,7 @@ import {
   type Genome,
   type MutEnv,
 } from './genome';
-import { D_CHEMO, D_PHOTO, Species, derive, tierBonusOf, hslToRgb, pairAccess, pairAlpha, pairEdible } from './species';
+import { D_CHEMO, D_PHOTO, Species, derive, type Diagnosis, tierBonusOf, hslToRgb, pairAccess, pairAlpha, pairEdible } from './species';
 
 export const MAXS = 96; // population slots (hard cap on living species)
 export const SOFT_CAP = 64; // above this, only major innovations found new species
@@ -32,6 +32,31 @@ export const ENERGY_REGEN = 0.28;
 export const HIST_EVERY = 8;
 /** Steps a volcano keeps smoking after an eruption. */
 export const VOLCANO_LIFE = 400;
+export type DifficultyId = 'gentle' | 'normal' | 'hard';
+
+export interface Difficulty {
+  id: DifficultyId;
+  name: string;
+  icon: string;
+  blurb: string;
+  startEnergy: number;
+  /** Multiplier on how fast divine energy returns. */
+  regen: number;
+  /** Multiplier on the price of every divine act. */
+  cost: number;
+  /** Multiplier on natural fires, eruptions, impacts and plagues. */
+  disasters: number;
+  edenTarget: number;
+  /** Animal species that must have lived before Dominion can be won. */
+  dominionAnimals: number;
+}
+
+export const DIFFICULTIES: Difficulty[] = [
+  { id: 'gentle', name: 'Gentle', icon: '🌱', blurb: 'Plenty of divine energy, cheap miracles and a calm planet.', startEnergy: 100, regen: 1.8, cost: 0.6, disasters: 0.5, edenTarget: 45, dominionAnimals: 6 },
+  { id: 'normal', name: 'Normal', icon: '⚖️', blurb: 'The world as it was meant to be.', startEnergy: 60, regen: 1, cost: 1, disasters: 1, edenTarget: 60, dominionAnimals: 8 },
+  { id: 'hard', name: 'Hard', icon: '🔥', blurb: 'Scarce energy, costly miracles and a restless planet full of fire, ash and plague.', startEnergy: 30, regen: 0.75, cost: 1.3, disasters: 1.6, edenTarget: 70, dominionAnimals: 10 },
+];
+
 export const EDEN_TARGET = 60;
 
 export type GoalId = 'awakening' | 'dominion' | 'eden' | 'sandbox';
@@ -46,7 +71,7 @@ export interface GoalInfo {
 export const GOALS: GoalInfo[] = [
   { id: 'awakening', name: 'The Awakening', icon: '✨', blurb: 'Raise a species that becomes aware of its own existence before the million years run out.' },
   { id: 'dominion', name: 'Dominion', icon: '👑', blurb: 'Let one animal species wipe out every other animal on the planet.' },
-  { id: 'eden', name: 'Garden of Eden', icon: '🌺', blurb: `Nurture a world where ${EDEN_TARGET} kinds of plants and animals live side by side.` },
+  { id: 'eden', name: 'Garden of Eden', icon: '🌺', blurb: 'Nurture a world teeming with life: 45 to 70 kinds of plants and animals side by side, depending on difficulty.' },
   { id: 'sandbox', name: 'Sandbox', icon: '🪐', blurb: 'No goal and unlimited divine power. Just play God.' },
 ];
 
@@ -131,6 +156,7 @@ export class Sim {
   readonly seed: number;
   readonly goal: GoalId;
   readonly sandbox: boolean;
+  readonly diff: Difficulty;
 
   tick = 0;
   year = 0;
@@ -172,6 +198,10 @@ export class Sim {
   private accF = new Float32Array(MAXS * MAXS);
   private totPop = new Float64Array(MAXS);
   private totCells = new Int32Array(MAXS);
+  /** Food eaten this step: eater slot × food slot. Flushed into the species' records every step. */
+  private eatMat = new Float64Array(MAXS * MAXS);
+  /** Biomass lost this step to a failing growth balance: hunger, crowding, a hostile climate. */
+  private hungerLoss = new Float64Array(MAXS);
   // scratch buffers for the per-cell loop
   private ps = new Int32Array(MAXS);
   private pp = new Float64Array(MAXS);
@@ -207,7 +237,9 @@ export class Sim {
   private nextPlague = 1;
   climateDirty = true;
 
-  constructor(seed: number, goal: GoalId) {
+  constructor(seed: number, goal: GoalId, difficulty: DifficultyId = 'normal') {
+    this.diff = DIFFICULTIES.find((d) => d.id === difficulty) ?? DIFFICULTIES[1];
+    this.energy = this.diff.startEnergy;
     this.seed = seed;
     this.goal = goal;
     this.sandbox = goal === 'sandbox';
@@ -385,7 +417,22 @@ export class Sim {
     if (sp.alive) this.rebuildTables(sp);
   }
 
-  private extinct(sp: Species): void {
+  private extinct(sp: Species, cause = ''): void {
+    // the reason is settled before the last of them vanish from the map
+    if (!cause) {
+      const recent = this.tick - sp.lastHitTick < 40 ? sp.lastHit : '';
+      if (recent === 'plague') cause = 'it was wiped out by plague';
+      else if (recent === 'fire') cause = 'the last of them were lost to the flames';
+      else if (recent === 'impact') cause = 'the impact destroyed its last refuges';
+      else if (recent === 'eruption') cause = 'its last refuges were buried in ash';
+      else {
+        const d = this.diagnose(sp);
+        if (d) sp.latest = d;
+        cause = this.explain(sp) || 'its numbers dwindled until too few were left to carry on';
+      }
+    }
+    sp.deathCause = cause;
+    sp.declineReason = '';
     const s = sp.slot;
     for (let c = 0; c < N; c++) this.pop[c * MAXS + s] = 0;
     this.slots[s] = null;
@@ -402,11 +449,7 @@ export class Sim {
     this.recentExtinctions.push(this.tick);
     const lived = sp.diedYear - sp.bornYear;
     const notable = sp.diedTick - sp.bornTick > 300 || sp.sentient;
-    if (notable) {
-      const recent = this.tick - sp.lastHitTick < 40 ? sp.lastHit : '';
-      const cause = recent === 'plague' ? 'wiped out by plague' : recent === 'fire' ? 'lost to the flames' : recent === 'impact' ? 'destroyed by the impact' : recent === 'eruption' ? 'buried in ash' : 'gone';
-      this.log('💀', `${sp.name} (${sp.desc.toLowerCase()}) is ${cause} after ${fmtYears(lived)}.`, { speciesId: sp.id });
-    }
+    if (notable) this.log('💀', `${sp.name} (${sp.desc.toLowerCase()}) died out after ${fmtYears(lived)}: ${cause}.`, { speciesId: sp.id });
   }
 
   // -------------------------------------------------------------------------
@@ -433,7 +476,7 @@ export class Sim {
     this.speciate();
     this.checkClimateNews();
     this.checkGoal();
-    if (!this.sandbox) this.energy = Math.min(MAX_ENERGY, this.energy + ENERGY_REGEN);
+    if (!this.sandbox) this.energy = Math.min(MAX_ENERGY, this.energy + ENERGY_REGEN * this.diff.regen);
     if (this.tick % HIST_EVERY === 0) {
       this.history.push({ tick: this.tick, o2: atm.o2, co2: atm.co2, temp: this.world.meanTemp, species: this.nAlive, bio: this.oceanPhoto + this.landPhoto + this.chemoBio + this.heteroBio });
     }
@@ -465,7 +508,7 @@ export class Sim {
   private populationStep(): void {
     const w = this.world;
     const { cls, ti, pi, mi, canopy, cover, plankton, photoProd, chemoProd, nb, isWater } = w;
-    const { pop, tLut, pLut, mLut, hab, fitOpen, fitForest, o2f, rate, disp, effH, effC, kBonus, tall, grazeLoss, dietCode, alpha, edible, accO, accF, aliveSlots, totPop, totCells, ps, pp, fit, gain, loss } = this;
+    const { pop, tLut, pLut, mLut, hab, fitOpen, fitForest, o2f, rate, disp, effH, effC, kBonus, tall, grazeLoss, dietCode, alpha, edible, accO, accF, aliveSlots, totPop, totCells, ps, pp, fit, gain, loss, eatMat, hungerLoss } = this;
     const nAlive = this.nAlive;
     totPop.fill(0);
     totCells.fill(0);
@@ -541,7 +584,11 @@ export class Sim {
               const q = cons / Fp;
               for (let b = 0; b < n; b++) {
                 const e = edible[row + ps[b]];
-                if (e > 0) loss[b] += q * e * pp[b] * grazeLoss[ps[b]];
+                if (e > 0) {
+                  const eaten = q * e * pp[b] * grazeLoss[ps[b]];
+                  loss[b] += eaten;
+                  eatMat[row + ps[b]] += eaten;
+                }
               }
             }
             if (wC > 0) {
@@ -551,7 +598,11 @@ export class Sim {
               for (let b = 0; b < n; b++) {
                 const o = accO[row + ps[b]];
                 const acc = o + (accF[row + ps[b]] - o) * cnp;
-                if (acc > 0) loss[b] += q * acc * pp[b];
+                if (acc > 0) {
+                  const eaten = q * acc * pp[b];
+                  loss[b] += eaten;
+                  eatMat[row + ps[b]] += eaten;
+                }
               }
             }
           }
@@ -570,6 +621,7 @@ export class Sim {
         let l = loss[a];
         if (l > 0.7 * P0) l = 0.7 * P0;
         let P = P0 + gain[a] - l;
+        if (gain[a] < 0) hungerLoss[s] -= gain[a];
         if (P < MINP) {
           pop[base + s] = 0;
           continue;
@@ -648,7 +700,42 @@ export class Sim {
     }
   }
 
+  /** Move this step's meals and losses into each species' lifetime record. */
+  private flushLedger(): void {
+    const { eatMat, hungerLoss } = this;
+    for (const a of this.alive) {
+      const row = a.slot * MAXS;
+      for (const b of this.alive) {
+        const v = eatMat[row + b.slot];
+        if (v <= 0) continue;
+        a.ate.set(b.id, (a.ate.get(b.id) ?? 0) + v);
+        b.eatenBy.set(a.id, (b.eatenBy.get(a.id) ?? 0) + v);
+        if (b.derived.auto) b.losses.grazed += v;
+        else b.losses.hunted += v;
+      }
+      a.losses.hunger += hungerLoss[a.slot];
+    }
+    eatMat.fill(0);
+    hungerLoss.fill(0);
+  }
+
+  /** Which named continents a species lives on now; new arrivals go into its record. */
+  private trackRange(sp: Species): void {
+    const w = this.world;
+    const seen = new Set<number>();
+    for (let c = 0; c < N; c++) {
+      if (w.isWater[c] || this.pop[c * MAXS + sp.slot] <= MINP) continue;
+      seen.add(w.continent[c]);
+    }
+    for (const id of seen) {
+      const cont = w.continents[id];
+      if (!cont?.name || cont.size < 60) continue;
+      if (!sp.reached.some((r) => r.name === cont.name)) sp.reached.push({ name: cont.name, year: this.year });
+    }
+  }
+
   private finishStats(): void {
+    this.flushLedger();
     const sample = this.tick % HIST_EVERY === 0;
     for (const sp of this.alive.slice()) {
       const s = sp.slot;
@@ -672,8 +759,23 @@ export class Sim {
         sp.established = true;
         this.onEstablished(sp);
       }
-      if (sample) sp.history.push(sp.totalPop);
+      if (sample) {
+        if (sp.historyStart < 0) sp.historyStart = this.tick;
+        sp.history.push(sp.totalPop);
+        sp.rangeHistory.push(sp.cells);
+      }
+      if (sp.genome.habitat !== 'aquatic' && (this.tick + sp.id * 3) % 50 === 0) this.trackRange(sp);
       if (sp.mutagen > 0) sp.mutagen--;
+      // keep a record of its heyday, and watch closely once it is in trouble
+      if (sp.established) {
+        const phase = (this.tick + sp.id) % 25;
+        if (phase === 0 && (!sp.baseline || sp.totalPop >= 0.85 * sp.peakPop)) sp.baseline = this.diagnose(sp);
+        const failing = sp.totalPop < 0.55 * sp.peakPop || sp.lowTicks > 0;
+        if (failing && phase % 8 === 0) {
+          sp.latest = this.diagnose(sp);
+          sp.declineReason = this.explain(sp);
+        } else if (!failing) sp.declineReason = '';
+      }
     }
     // a wave of deaths in a short span is a mass extinction
     const horizon = this.tick - 30;
@@ -864,7 +966,7 @@ export class Sim {
         let weakest: Species | null = null;
         for (const o of members) if (o !== parent && o.established && (!weakest || o.totalPop < weakest.totalPop)) weakest = o;
         if (!weakest || weakest.totalPop > 0.05 * parent.totalPop) return null;
-        this.extinct(weakest);
+        this.extinct(weakest, `it was crowded out of its niche by a new offshoot of ${parent.name}, which lives the same way`);
       } else if (this.nAlive >= HARD_CAP) {
         // the world is full: the most marginal species of a crowded niche makes way
         const counts = new Map<string, number>();
@@ -880,7 +982,7 @@ export class Sim {
           }
         }
         if (!weakest) return null;
-        this.extinct(weakest);
+        this.extinct(weakest, 'the world filled up with species, and it was the most marginal of those living the same way');
       }
     }
 
@@ -904,6 +1006,151 @@ export class Sim {
     this.pop[src] = Math.max(0, this.pop[src] - founders * 0.5);
     this.plant(sp, target, founders);
     return sp;
+  }
+
+  /** Measure how a species is faring where it lives (a sample of its cells, weighted by numbers). */
+  diagnose(sp: Species): Diagnosis | null {
+    if (!sp.alive) return null;
+    const w = this.world;
+    const s = sp.slot;
+    const occ: number[] = [];
+    for (let c = 0; c < N; c++) if (this.pop[c * MAXS + s] > 0.02) occ.push(c);
+    if (!occ.length) return null;
+    for (let i = occ.length - 1; i > 0 && i >= occ.length - 90; i--) {
+      const j = this.rng.int(i + 1);
+      const t = occ[i];
+      occ[i] = occ[j];
+      occ[j] = t;
+    }
+    const sample = occ.slice(Math.max(0, occ.length - 90));
+    const d: Diagnosis = { tick: this.tick, rate: this.rate[s], fit: 0, tF: 0, pF: 0, mF: 0, oF: 0, temp: 0, ph: 0, moist: 0, comp: 0, compBy: -1, self: 0, pred: 0, predBy: -1, graze: 0, grazeBy: -1, food: -1 };
+    const compBy = new Map<number, number>();
+    const predBy = new Map<number, number>();
+    const grazeBy = new Map<number, number>();
+    const foodBy = new Map<number, number>();
+    let W = 0;
+    let landW = 0;
+    for (const c of sample) {
+      const P = this.pop[c * MAXS + s];
+      W += P;
+      const cnp = w.canopy[c];
+      const tF = this.tLut[s * T_LUT + w.ti[c]];
+      const pF = this.pLut[s * P_LUT + w.pi[c]];
+      const mF = this.mLut[s * M_LUT + w.mi[c]];
+      const oF = this.o2f[s];
+      const fit = tF * pF * mF * this.hab[s * 4 + w.cls[c]] * (this.fitOpen[s] + (this.fitForest[s] - this.fitOpen[s]) * cnp) * oF;
+      d.fit += P * fit;
+      d.tF += P * tF;
+      d.pF += P * pF;
+      d.oF += P * oF;
+      d.temp += P * w.temp[c];
+      d.ph += P * w.ph[c];
+      if (!w.isWater[c]) {
+        d.mF += P * mF;
+        d.moist += P * w.moist[c];
+        landW += P;
+      }
+      const com = this.community(c);
+      // what it needs: light and minerals for plants, food for eaters
+      let K: number;
+      const dc = this.dietCode[s];
+      if (dc === D_PHOTO) K = KSCALE * w.photoProd[c];
+      else if (dc === D_CHEMO) K = KSCALE * w.chemoProd[c];
+      else {
+        K = 0;
+        for (let i = 0; i < com.list.length; i++) {
+          const o = com.list[i];
+          if (o === sp) continue;
+          const e = this.effH[s] * this.edible[s * MAXS + o.slot] + this.effC[s] * (this.accO[s * MAXS + o.slot] + (this.accF[s * MAXS + o.slot] - this.accO[s * MAXS + o.slot]) * cnp);
+          const v = e * com.pops[i];
+          K += v;
+          if (v > 0) foodBy.set(o.id, (foodBy.get(o.id) ?? 0) + v * P);
+        }
+        K *= this.kBonus[s];
+      }
+      K = Math.max(K, 1e-3);
+      for (let i = 0; i < com.list.length; i++) {
+        const o = com.list[i];
+        const a = this.alpha[s * MAXS + o.slot] * com.pops[i];
+        if (o === sp) d.self += (P * this.rate[s] * a) / K;
+        else if (a > 0) {
+          const v = (this.rate[s] * a) / K;
+          d.comp += P * v;
+          compBy.set(o.id, (compBy.get(o.id) ?? 0) + P * v);
+        }
+        if (o === sp) continue;
+        if (com.qC[i] > 0) {
+          const acc = this.accO[o.slot * MAXS + s] + (this.accF[o.slot * MAXS + s] - this.accO[o.slot * MAXS + s]) * cnp;
+          const v = com.qC[i] * acc;
+          if (v > 0) {
+            d.pred += P * v;
+            predBy.set(o.id, (predBy.get(o.id) ?? 0) + P * v);
+          }
+        }
+        if (com.qH[i] > 0) {
+          const v = com.qH[i] * this.edible[o.slot * MAXS + s] * this.grazeLoss[s];
+          if (v > 0) {
+            d.graze += P * v;
+            grazeBy.set(o.id, (grazeBy.get(o.id) ?? 0) + P * v);
+          }
+        }
+      }
+    }
+    for (const k of ['fit', 'tF', 'pF', 'oF', 'temp', 'ph', 'comp', 'self', 'pred', 'graze'] as const) d[k] /= W;
+    d.mF = landW > 0 ? d.mF / landW : 1;
+    d.moist = landW > 0 ? d.moist / landW : 1;
+    const top = (m: Map<number, number>) => [...m.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? -1;
+    d.compBy = top(compBy);
+    d.predBy = top(predBy);
+    d.grazeBy = top(grazeBy);
+    d.food = top(foodBy);
+    return d;
+  }
+
+  /**
+   * Why is this species failing? Whatever got most worse between its heyday and now: the climate,
+   * hunters, grazers, rivals or its food. Returns an empty string when nothing stands out.
+   */
+  explain(sp: Species): string {
+    const now = sp.latest;
+    if (!now) return '';
+    const base = sp.baseline && sp.baseline.tick < now.tick ? sp.baseline : null;
+    const g = sp.genome;
+    const name = (id: number) => this.species[id]?.name ?? 'another species';
+    const fate = (id: number) => (this.species[id] && !this.species[id].alive ? ' (now extinct itself)' : '');
+    const cands: [number, string][] = [];
+
+    // the place itself turned hostile
+    const drops: [number, string][] = [
+      [(base ? base.tF : 1) - now.tF, now.temp > g.tempOpt ? `the climate grew too hot for it (around ${Math.round(now.temp)} °C where it lived, against the ${Math.round(g.tempOpt)} °C it was built for)` : `the climate grew too cold for it (around ${Math.round(now.temp)} °C where it lived, against the ${Math.round(g.tempOpt)} °C it was built for)`],
+      [(base ? base.pF : 1) - now.pF, now.ph < g.phOpt ? `its ${g.habitat === 'aquatic' ? 'waters' : 'soils'} turned too acidic (pH ${now.ph.toFixed(1)})` : `its ${g.habitat === 'aquatic' ? 'waters' : 'soils'} turned too alkaline (pH ${now.ph.toFixed(1)})`],
+      [(base ? base.mF : 1) - now.mF, now.moist < g.moistOpt ? 'the land dried out under it' : 'the land grew too wet for it'],
+      [(base ? base.oF : 1) - now.oF, g.diet === 'chemo' && g.tier === 0 ? 'the oxygen that filled the air poisoned it, as it does all the ancient vent microbes' : 'there was too little oxygen in the air for a body like this'],
+    ];
+    drops.sort((a, b) => b[0] - a[0]);
+    const envScore = (base ? Math.max(0, base.fit - now.fit) : Math.max(0, 0.5 - now.fit)) * now.rate;
+    if (drops[0][0] > 0.05) cands.push([envScore, drops[0][1]]);
+
+    const dPred = now.pred - (base?.pred ?? 0);
+    if (now.predBy >= 0) cands.push([dPred, `it was hunted down by ${name(now.predBy)}${fate(now.predBy)}`]);
+    const dGraze = now.graze - (base?.graze ?? 0);
+    if (now.grazeBy >= 0) cands.push([dGraze, `it was grazed away by ${name(now.grazeBy)}${fate(now.grazeBy)}`]);
+    const dComp = now.comp - (base?.comp ?? 0);
+    if (now.compBy >= 0) cands.push([dComp, `it was outcompeted by ${name(now.compBy)}${fate(now.compBy)}, which lives the same way`]);
+
+    // its own needs outgrew what the place offers
+    const dSelf = now.self - (base?.self ?? 0);
+    if (sp.derived.auto) {
+      const co2 = this.world.atm.co2 < 160 && g.diet === 'photo';
+      cands.push([dSelf, co2 ? 'there was too little carbon dioxide left in the air to feed it' : g.diet === 'photo' ? 'its ground offered less and less: too little light, warmth or minerals' : 'the vents and minerals it lived on gave out']);
+    } else {
+      const food = base?.food ?? now.food;
+      const f = food >= 0 && food !== now.food ? `its main food, ${name(food)}, became scarce${fate(food)}` : food >= 0 ? `it starved as its food, ${name(food)}${fate(food)}, grew scarce` : 'it starved: there was too little left to eat';
+      cands.push([dSelf, f]);
+    }
+
+    cands.sort((a, b) => b[0] - a[0]);
+    return cands[0] && cands[0][0] > 0.002 ? cands[0][1] : '';
   }
 
   /** Who lives in a cell, and how hard each of them grazes (qH) and hunts (qC) per unit of food. */
@@ -1115,13 +1362,13 @@ export class Sim {
       case 'dominion': {
         let animals = 0;
         for (const sp of this.alive) if (sp.kind === 'animal') animals++;
-        if (this.animalsEver < 8) return { value: 0, label: `Animals so far: ${this.animalsEver} of 8 needed before the cull` };
+        if (this.animalsEver < this.diff.dominionAnimals) return { value: 0, label: `Animals so far: ${this.animalsEver} of ${this.diff.dominionAnimals} needed before the cull` };
         return { value: animals <= 1 ? 1 : 1 / animals, label: `${animals} animal species remain` };
       }
       case 'eden':
       {
         const n = this.alive.filter((sp) => sp.established && sp.kind !== 'microbe').length;
-        return { value: Math.min(1, n / EDEN_TARGET), label: `${n} of ${EDEN_TARGET} plants and animals` };
+        return { value: Math.min(1, n / this.diff.edenTarget), label: `${n} of ${this.diff.edenTarget} plants and animals` };
       }
       default:
         return { value: 0, label: 'No goal: do as you please' };
@@ -1143,13 +1390,13 @@ export class Sim {
       }
     } else if (this.goal === 'dominion') {
       const animals = this.alive.filter((sp) => sp.kind === 'animal');
-      if (this.animalsEver >= 8 && animals.length === 1 && animals[0].established) {
+      if (this.animalsEver >= this.diff.dominionAnimals && animals.length === 1 && animals[0].established) {
         this.end('won', 'Dominion', `In ${yr}, ${animals[0].name} is the only animal left on the planet. Every rival has been eaten, starved or crowded out.`);
         return;
       }
     } else if (this.goal === 'eden') {
       const n = this.alive.filter((sp) => sp.established && sp.kind !== 'microbe').length;
-      if (n >= EDEN_TARGET) {
+      if (n >= this.diff.edenTarget) {
         this.end('won', 'Garden of Eden', `In ${yr}, ${n} kinds of plants and animals share your world: a living tapestry from pole to pole.`);
         return;
       }
@@ -1224,6 +1471,7 @@ export class Sim {
       if (p <= 0) continue;
       const g = sp.genome;
       this.pop[base + sp.slot] = p * (1 - sp.derived.fireLoss);
+      sp.losses.fire += p * sp.derived.fireLoss;
       sp.lastHit = 'fire';
       sp.lastHitTick = this.tick;
     }
@@ -1258,6 +1506,7 @@ export class Sim {
       const p = this.pop[base + sp.slot];
       if (p <= 0) continue;
       this.pop[base + sp.slot] = p * (1 - frac);
+      sp.losses.disaster += p * frac;
       sp.lastHit = cause;
       sp.lastHitTick = this.tick;
     }
@@ -1355,6 +1604,7 @@ export class Sim {
       for (const c of pl.active) {
         const before = this.pop[c * MAXS + slot];
         pl.killed += before * mort;
+        sp.losses.plague += before * mort;
         this.pop[c * MAXS + slot] = before * (1 - mort);
         const st = ++pl.state[c];
         if (st <= pl.duration) next.push(c);
@@ -1397,15 +1647,16 @@ export class Sim {
 
   private naturalEvents(): void {
     const w = this.world;
-    if (this.rng.chance(0.06 * this.fireOxygen())) {
+    const dis = this.diff.disasters;
+    if (this.rng.chance(0.06 * dis * this.fireOxygen())) {
       for (let i = 0; i < 4; i++) {
         const c = this.rng.int(N);
         if (!w.isWater[c] && this.fuelAt(c) > 0.4 && w.moist[c] < 0.55 && this.ignite(c)) break;
       }
     }
-    if (this.rng.chance(0.002)) this.volcano(this.rng.int(N), true);
-    if (this.rng.chance(0.0003)) this.meteor(this.rng.int(N), true);
-    if (this.rng.chance(0.004) && this.alive.length) {
+    if (this.rng.chance(0.002 * dis)) this.volcano(this.rng.int(N), true);
+    if (this.rng.chance(0.0003 * dis)) this.meteor(this.rng.int(N), true);
+    if (this.rng.chance(0.004 * dis) && this.alive.length) {
       const sp = this.rng.pick(this.alive);
       if (sp.cells > 80 && sp.established && sp.kind !== 'microbe' && this.rng.chance(0.3 + sp.genome.social)) {
         const c = this.randomOccupiedCell(sp);
@@ -1418,12 +1669,18 @@ export class Sim {
   // Divine interface
   // -------------------------------------------------------------------------
 
-  canAfford(cost: number): boolean {
-    return this.sandbox || this.energy >= cost;
+  /** What a divine act with this base price costs at the chosen difficulty. */
+  price(base: number): number {
+    return Math.round(base * this.diff.cost);
   }
 
-  spend(cost: number): boolean {
+  canAfford(base: number): boolean {
+    return this.sandbox || this.energy >= this.price(base);
+  }
+
+  spend(base: number): boolean {
     if (this.sandbox) return true;
+    const cost = this.price(base);
     if (this.energy < cost) return false;
     this.energy -= cost;
     return true;
@@ -1443,7 +1700,7 @@ export class Sim {
   }
 
   atmCost(key: AtmKey, value: number): number {
-    return 50 * Math.abs(Sim.atmNorm(key, value) - Sim.atmNorm(key, this.world.atm[key]));
+    return 50 * this.diff.cost * Math.abs(Sim.atmNorm(key, value) - Sim.atmNorm(key, this.world.atm[key]));
   }
 
   /** God sets a property of the air, the sun or the sea. Costs energy in proportion to the change. */
@@ -1462,7 +1719,7 @@ export class Sim {
       value = Sim.atmFromNorm(key, n0 + (n1 - n0) * frac);
       cost = this.energy;
     }
-    this.spend(cost);
+    if (!this.sandbox) this.energy = Math.max(0, this.energy - cost);
     a[key] = value;
     if (key === 'seaLevel') this.world.updateGeography();
     this.climateDirty = true;

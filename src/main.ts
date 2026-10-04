@@ -1,8 +1,9 @@
 import './style.css';
 import { POWERS, usePower, type PowerId } from './sim/powers';
-import { Sim, type GoalId } from './sim/simulation';
+import { MAXS, Sim, type DifficultyId, type GoalId } from './sim/simulation';
 import { H, W } from './sim/world';
 import { MapRenderer, type Layer } from './ui/renderer';
+import { Sound, type SoundMode } from './ui/audio';
 import { Tutorial } from './ui/tutorial';
 import { UI, type Game } from './ui/ui';
 
@@ -34,10 +35,30 @@ class App implements Game {
   /** A press on the map: it becomes a drag (pan) once the pointer moves far enough, otherwise a click. */
   private drag: { x: number; y: number; lastX: number; lastY: number; moved: boolean; button: number } | null = null;
   tutorial: Tutorial;
+  sound = new Sound();
+  private heardEvents = 0;
+  private mixFrame = 0;
   place: { cell: number; radius: number } | null = null;
 
   constructor() {
     this.ui = new UI(this);
+    // browsers only allow sound once the player has clicked or pressed a key
+    const unlock = () => this.sound.unlock();
+    window.addEventListener('pointerdown', unlock, { capture: true });
+    window.addEventListener('keydown', unlock, { capture: true });
+    const modes: SoundMode[] = ['all', 'effects', 'off'];
+    const label = () => {
+      const b = $('btn-sound');
+      b.textContent = { all: '🔊', effects: '🔉', off: '🔇' }[this.sound.mode];
+      b.title = { all: 'Sound: effects, ambience and music (click to change)', effects: 'Sound: effects and ambience, no music (click to change)', off: 'Sound off (click to change)' }[this.sound.mode];
+    };
+    label();
+    $('btn-sound').addEventListener('click', () => {
+      this.sound.unlock();
+      this.sound.setMode(modes[(modes.indexOf(this.sound.mode) + 1) % modes.length]);
+      label();
+      this.sound.play('click');
+    });
     this.tutorial = new Tutorial({
       zoom: () => this.renderer?.zoom ?? 1,
       selectedId: () => this.selectedId,
@@ -52,8 +73,8 @@ class App implements Game {
     requestAnimationFrame((t) => this.frame(t));
   }
 
-  start(seed: number, goal: GoalId, tutorial = false): void {
-    this.sim = new Sim(seed, goal);
+  start(seed: number, goal: GoalId, tutorial = false, difficulty: DifficultyId = 'normal'): void {
+    this.sim = new Sim(seed, goal, difficulty);
     this.renderer = new MapRenderer($<HTMLCanvasElement>('map'), $<HTMLCanvasElement>('overlay'), this.sim);
     this.selectedId = -1;
     this.tool = 'inspect';
@@ -63,6 +84,7 @@ class App implements Game {
     this.endShown = false;
     this.dirty = true;
     this.place = null;
+    this.heardEvents = this.sim.events.length;
     this.ui.reset();
     this.ui.setLegend(this.renderer.layer);
     this.fitMap();
@@ -101,6 +123,7 @@ class App implements Game {
   }
 
   select(id: number): void {
+    if (id >= 0 && id !== this.selectedId) this.sound.play('select');
     this.selectedId = id;
     this.ui.refresh(performance.now(), true);
   }
@@ -269,6 +292,65 @@ class App implements Game {
     this.ui.refresh(performance.now(), true);
   }
 
+  /** Sounds for what just happened, and an ambience that follows what the map is showing. */
+  private listen(): void {
+    const sim = this.sim;
+    const evs = sim.events;
+    // at high speed many things happen at once; only the most recent few are heard
+    const from = Math.max(this.heardEvents, evs.length - 4);
+    for (let i = from; i < evs.length; i++) this.sound.forEvent(evs[i].icon, !!evs[i].major);
+    this.heardEvents = evs.length;
+
+    if (this.mixFrame++ % 10 !== 0) return;
+    const r = this.renderer;
+    const w = sim.world;
+    const vw = W / r.zoom;
+    const vh = H / r.zoom;
+    const x0 = r.cx - vw / 2;
+    const y0 = r.cy - vh / 2;
+    const step = Math.max(1, Math.floor(vw / 24));
+    let n = 0;
+    let water = 0;
+    let life = 0;
+    let birds = false;
+    const close = r.zoom >= 3;
+    for (let y = Math.max(0, Math.floor(y0)); y < Math.min(H, y0 + vh); y += step) {
+      for (let x = Math.max(0, Math.floor(x0)); x < Math.min(W, x0 + vw); x += step) {
+        const c = y * W + x;
+        n++;
+        if (w.isWater[c]) {
+          water++;
+          continue;
+        }
+        if (!close) continue;
+        for (const sp of sim.alive) {
+          if (sp.kind !== 'animal' || sp.genome.habitat === 'aquatic') continue;
+          if (sim.pop[c * MAXS + sp.slot] > 1) {
+            life++;
+            if (sp.genome.flight > 0.4) birds = true;
+            break;
+          }
+        }
+      }
+    }
+    let fires = 0;
+    for (const c of sim.fires) {
+      const fx = c % W;
+      const fy = Math.floor(c / W);
+      if (fx >= x0 && fx < x0 + vw && fy >= y0 && fy < y0 + vh) fires++;
+    }
+    const land = n - water;
+    this.sound.update({
+      water: n ? water / n : 0,
+      land: n ? land / n : 0,
+      fire: Math.min(1, fires / 12),
+      life: land ? Math.min(1, (life / land) * Math.min(1, (r.zoom - 2) / 4)) : 0,
+      birds,
+      age: sim.milestones.has('advanced') || sim.milestones.has('landAnimal') ? 1 : 0,
+      paused: this.paused,
+    });
+  }
+
   /** Clicking a place opens the place inspector: everything that lives there. */
   private inspect(cell: number): void {
     this.setPlace(cell);
@@ -354,6 +436,7 @@ class App implements Game {
         this.ui.showEnd();
       }
       this.tutorial.update(now);
+      this.listen();
     }
     requestAnimationFrame((t) => this.frame(t));
   }

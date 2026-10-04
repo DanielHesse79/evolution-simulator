@@ -15,6 +15,9 @@ Then open http://localhost:5173. `npm run build` produces a static site in `dist
 
 ## Playing
 
+- **Difficulty**: Gentle, Normal or Hard set your starting divine energy, how fast it returns,
+  the price of every miracle, how often the planet itself strikes with fire, eruptions, impacts and
+  plague, and how demanding the Eden and Dominion goals are.
 - **Goals**: raise a self-aware species (*The Awakening*), let one animal exterminate all others
   (*Dominion*), grow a rich biosphere (*Garden of Eden*), or just play in the *Sandbox*.
 - **Air, Sun & Sea**: sliders for solar output, CO₂, oxygen, methane, sulfur haze and sea level. The
@@ -31,6 +34,13 @@ Then open http://localhost:5173. `npm run build` produces a static site in `dist
   **World / Region / Landscape / Close-up** buttons at the foot of the map fly there step by step.
 - **Pictures**: every species gets a portrait generated from its genes (body plan, horns, fur,
   armour, wings, warning colours, company), shown in the lists and in the **📖 Field guide**.
+- **Stats and causes of death**: **📊 Stats** shows how a species spread (numbers, range and the
+  continents it reached), what killed it (hunters, grazers, plague, fire, disasters, hunger), who ate
+  it and what it ate. When a species declines or dies out, the game diagnoses why by comparing its
+  living conditions now with its heyday: climate, acidity, rain, oxygen, predators, grazers, rivals
+  or food.
+- **Sound**: effects, an ambience that follows the map (surf, wind, fire, birdsong) and a slow
+  generative score, all synthesised in the browser. 🔊 cycles music+effects / effects / off.
 - **Cells**: **🔬 Cell** on any species draws how we imagine its cells are built (prokaryote, plant
   or animal cell, organelles labelled) and lists the cell types its body is made of. The help screen
   has textbook cells to compare with.
@@ -74,6 +84,7 @@ cools the planet, so a blooming biosphere can tip the world into an ice age.
 | `src/ui/renderer.ts` | Map painting, zoom/pan and the close-up landscape |
 | `src/ui/cell.ts` | Generated cell drawings and cell-type descriptions |
 | `src/ui/portrait.ts` | Generated portraits of every species |
+| `src/ui/audio.ts` | Synthesised sound effects, ambience and music |
 | `src/ui/tutorial.ts` | The guided tour |
 | `src/ui/` (rest) | Panels, tree of life |
 | `scripts/headless.ts` | Run a world without the UI (`npm run sim -- <seed> <steps>`) for balancing |

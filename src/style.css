@@ -1557,3 +1557,162 @@ input[type='range'] {
   color: var(--muted);
   font-size: 11px;
 }
+
+/* ------------------------------------------------------------------ stats */
+
+.d-actions {
+  flex-wrap: wrap;
+}
+
+.d-actions button {
+  flex: 1 1 28%;
+}
+
+.warn {
+  color: #f0b45a;
+}
+
+.statcard h3 {
+  margin: 14px 0 6px;
+}
+
+.stat-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.stat-head img {
+  width: 132px;
+  height: 99px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+}
+
+.stat-head h2 {
+  margin: 0 0 2px;
+  font: 600 20px/1.2 var(--serif);
+  color: var(--gold);
+}
+
+.stat-head .sub {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stat-head button {
+  margin-left: auto;
+  align-self: flex-start;
+}
+
+.stat-chart {
+  display: block;
+  width: 100%;
+  height: 170px;
+  background: #0a1020;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.stat-chart text {
+  font: 10.5px 'Segoe UI', system-ui, sans-serif;
+  fill: var(--muted);
+}
+
+.stat-legend,
+.stat-causes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.stat-legend i,
+.stat-causes i {
+  display: inline-block;
+  width: 12px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
+.stat-legend i.dash {
+  background: repeating-linear-gradient(90deg, #4fd1c5 0 5px, transparent 5px 8px);
+}
+
+.stat-causes b {
+  color: var(--text);
+}
+
+.stat-reach {
+  margin-top: 6px;
+  font-size: 12.5px;
+}
+
+.stat-reach small {
+  color: var(--muted);
+}
+
+.stat-bar {
+  display: flex;
+  height: 14px;
+  border-radius: 7px;
+  overflow: hidden;
+  background: #0a1020;
+}
+
+.stat-fate {
+  margin: 0 0 8px;
+  color: #f0b45a;
+  font: 14px/1.4 var(--serif);
+}
+
+.stat-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.stat-cols .site-sp {
+  grid-template-columns: 40px 1fr 40px;
+}
+
+.stat-cols .pct {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--gold);
+}
+
+.diffs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.diffcard {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 11px;
+  text-align: left;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.diffcard b {
+  font: 600 14px/1.2 var(--serif);
+}
+
+.diffcard span {
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.diffcard.on {
+  border-color: var(--gold);
+  background: #2a2412;
+}

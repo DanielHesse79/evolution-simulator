@@ -8,6 +8,35 @@ export const D_OMNI = 4;
 
 const DIET_CODE = { chemo: D_CHEMO, photo: D_PHOTO, herb: D_HERB, carn: D_CARN, omni: D_OMNI } as const;
 
+/**
+ * A snapshot of how a species is doing where it lives, averaged over its range and weighted by
+ * numbers. Comparing a snapshot from its heyday with one from its decline tells why it is failing.
+ */
+export interface Diagnosis {
+  tick: number;
+  rate: number;
+  /** Overall fitness of the places it lives, and its factors (1 = perfect). */
+  fit: number;
+  tF: number;
+  pF: number;
+  mF: number;
+  oF: number;
+  /** Mean conditions where it lives. */
+  temp: number;
+  ph: number;
+  moist: number;
+  /** Per-capita drag from rivals (comp), from its own crowding against the food or light on offer (self), from hunters and grazers. */
+  comp: number;
+  compBy: number;
+  self: number;
+  pred: number;
+  predBy: number;
+  graze: number;
+  grazeBy: number;
+  /** Its most important food, for eaters. */
+  food: number;
+}
+
 /** Numbers the simulation needs every tick, pre-computed from a genome. */
 export interface Derived {
   auto: boolean;
@@ -201,6 +230,23 @@ export class Species {
   children = 0;
   /** Consecutive ticks spent below a viable population. */
   lowTicks = 0;
+  /** How it was doing at its best, and lately. */
+  baseline: Diagnosis | null = null;
+  latest: Diagnosis | null = null;
+  /** Why it is shrinking, while it is; and why it died out, once it has. */
+  declineReason = '';
+  deathCause = '';
+  /** Biomass lost over its whole history, by cause. */
+  losses = { hunted: 0, grazed: 0, hunger: 0, plague: 0, fire: 0, disaster: 0 };
+  /** Biomass of this species eaten by each other species (by id), and what it ate of each. */
+  eatenBy = new Map<number, number>();
+  ate = new Map<number, number>();
+  /** Number of map cells it occupied, sampled alongside `history`. */
+  rangeHistory: number[] = [];
+  /** Tick of the first `history` sample. */
+  historyStart = -1;
+  /** The continents it reached, in order. */
+  reached: { name: string; year: number }[] = [];
 
   constructor(genome: Genome) {
     this.genome = genome;

@@ -8,12 +8,12 @@ const seeds = process.argv.slice(2).map(Number);
 if (!seeds.length) seeds.push(1, 2, 3);
 
 for (const seed of seeds) {
-  const sim = new Sim(seed, 'awakening');
+  const sim = new Sim(seed, 'awakening', (process.env.DIFF as 'gentle' | 'normal' | 'hard') ?? 'normal');
   let guided = 0;
   let born = 0;
   while (sim.status === 'running' && sim.tick < TOTAL_TICKS) {
     sim.step();
-    if (sim.energy < GUIDE_COST || sim.tick % 5 !== 0) continue;
+    if (!sim.canAfford(GUIDE_COST) || sim.tick % 5 !== 0) continue;
     // the most promising mind: an advanced animal, preferably on land
     let best: Species | null = null;
     let bestScore = -1;

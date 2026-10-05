@@ -1,5 +1,6 @@
 import { fbm, makeNoise3, type Noise3 } from './noise';
 import { RNG } from './rng';
+import { Tectonics, meanCycle } from './earth';
 
 export const W = 160;
 export const H = 90;
@@ -68,6 +69,18 @@ export class World {
   readonly basePh = new Float32Array(N);
   readonly vent = new Float32Array(N);
   readonly tempNoise = new Float32Array(N);
+  readonly rockRadiation = new Float32Array(N);
+  readonly radiation = new Float32Array(N);
+  readonly uv = new Float32Array(N);
+  readonly ice = new Float32Array(N);
+  readonly tectonics: Tectonics;
+  private crustMinerals!: Float32Array;
+  private crustPh!: Float32Array;
+  private crustRadiation!: Float32Array;
+  terrainVersion = 0;
+  iceSeaLevel = 0;
+  orbitalForcing = 0;
+  get seaLevel(): number { return this.atm.seaLevel + this.iceSeaLevel; }
 
   // divine / event modifications, slowly fading
   readonly moistMod = new Float32Array(N);
@@ -146,6 +159,7 @@ export class World {
         this.baseMoist[c] = fbm(nMoist, cx * 1.6, cy * 1.6, z * 1.6, 4);
         this.baseMinerals[c] = clamp(0.5 + 1.1 * fbm(nMin, cx * 2.2, cy * 2.2, z * 2.2, 4), 0, 1);
         this.basePh[c] = 6.5 + 2.2 * fbm(nPh, cx * 1.9, cy * 1.9, z * 1.9, 3);
+        this.rockRadiation[c] = 0.3 + 1.5 * Math.pow(this.baseMinerals[c], 2) + Math.max(0, this.elev[c]) * 0.6;
         this.tempNoise[c] = fbm(nTemp, cx * 2.4, cy * 2.4, z * 2.4, 3);
         const ridge = 1 - Math.abs(fbm(nVent, cx * 1.7, cy * 1.7, z * 1.7, 3));
         this.vent[c] = smoothstep(0.86, 0.98, ridge);
@@ -156,6 +170,11 @@ export class World {
         this.nb[c * 4 + 3] = y < H - 1 ? c + W : -1;
       }
     }
+    this.tectonics = new Tectonics(W, H, this.elev, seed);
+    this.crustMinerals = this.baseMinerals.slice();
+    this.crustPh = this.basePh.slice();
+    this.crustRadiation = this.rockRadiation.slice();
+    this.vent.set(this.tectonics.activity);
     this.updateGeography();
     this.updateClimate();
   }
@@ -175,6 +194,13 @@ export class World {
 
   /** Continuous elevation in [-1, 1] at map coordinates u,v in [0,1]; 0 is the original sea level. */
   elevAt(u: number, v: number): number {
+    if (this.terrainVersion > 0) {
+      const x = ((u * W - 0.5) % W + W) % W, y = clamp(v * H - 0.5, 0, H - 1);
+      const x0 = Math.floor(x), y0 = Math.floor(y), x1 = (x0 + 1) % W, y1 = Math.min(H - 1, y0 + 1);
+      const fx = x - x0, fy = y - y0;
+      return (this.elev[y0 * W + x0] * (1 - fx) + this.elev[y0 * W + x1] * fx) * (1 - fy)
+        + (this.elev[y1 * W + x0] * (1 - fx) + this.elev[y1 * W + x1] * fx) * fy;
+    }
     const raw = this.rawAt(u, v);
     return raw > this.thr
       ? Math.min(1.05, Math.pow((raw - this.thr) / this.posMax, 1.2))
@@ -183,14 +209,17 @@ export class World {
 
   /** Recompute coastlines, distance to the sea and continents. Needed whenever sea level moves. */
   updateGeography(): void {
-    const sea = this.atm.seaLevel;
+    const sea = this.seaLevel;
     const { elev, isWater, distCoast, continent, nb } = this;
     let land = 0;
+    let area = 0;
     for (let c = 0; c < N; c++) {
+      const weight = Math.cos(this.absLat[c] * Math.PI / 2);
+      area += weight;
       isWater[c] = elev[c] < sea ? 1 : 0;
-      if (!isWater[c]) land++;
+      if (!isWater[c]) land += weight;
     }
-    this.landFrac = land / N;
+    this.landFrac = land / area;
 
     // breadth-first distance from the sea, capped
     const queue = new Int32Array(N);
@@ -292,17 +321,18 @@ export class World {
     const co2 = Math.max(20, a.co2);
     const greenhouse = 3.0 * Math.log2(co2 / 280) + 1.0 * Math.log2(1 + a.ch4 / 10);
     const aerosol = -(a.so2 + a.dust) * 0.06;
-    const off = a.sun + greenhouse + aerosol;
+    const off = a.sun + greenhouse + aerosol + this.orbitalForcing;
     this.forcing = off;
     const co2f = (1.4 * a.co2) / (a.co2 + 150);
     const acidRain = a.so2 * 0.02;
     const oceanPh = 8.2 - 0.35 * Math.log2(co2 / 280) - a.so2 * 0.006;
-    const sea = a.seaLevel;
+    const sea = this.seaLevel;
     const { elev, absLat, light, isWater, temp, moist, ph, minerals, cls, photoProd, chemoProd, ti, pi, mi } = this;
     const { baseMoist, baseMinerals, basePh, vent, tempNoise, moistMod, mineralMod, phMod, distCoast } = this;
 
     let sumT = 0;
     let ice = 0;
+    let area = 0;
     for (let c = 0; c < N; c++) {
       // the fading of divine touch-ups
       moistMod[c] *= 0.996;
@@ -310,6 +340,8 @@ export class World {
       phMod[c] *= 0.996;
 
       const al = absLat[c];
+      const weight = Math.cos(al * Math.PI / 2);
+      area += weight;
       const amp = off * (0.8 + 0.5 * al); // poles feel climate change more
       const min = clamp(baseMinerals[c] + mineralMod[c], 0, 1);
       minerals[c] = min;
@@ -319,7 +351,7 @@ export class World {
         t = 29 - 40 * Math.pow(al, 1.5) + amp * 0.9;
         if (t < -2) t = -2;
         const frozen = t <= -1.5;
-        if (frozen) ice++;
+        if (frozen) ice += weight;
         moist[c] = 1;
         p = oceanPh + phMod[c];
         const shallow = elev[c] > sea - SHELF;
@@ -330,8 +362,8 @@ export class World {
         mi[c] = M_WATER;
       } else {
         const h = elev[c] - sea;
-        t = 29 - 44 * Math.pow(al, 1.5) - h * 30 + tempNoise[c] * 2.5 + amp;
-        if (t < -8) ice++;
+        t = 29 - 44 * Math.pow(al, 1.5) - h * 30 + tempNoise[c] * 2.5 + amp - this.ice[c] * 3;
+        if (t < -8) ice += weight;
         let m = 0.5 + 0.3 * Math.cos(al * Math.PI * 3.2) + baseMoist[c] * 0.28;
         m += -0.012 * Math.min(distCoast[c], 14) + off * 0.006 + moistMod[c];
         m = clamp(m, 0, 1);
@@ -345,12 +377,42 @@ export class World {
       p = clamp(p, 0, 14);
       temp[c] = t;
       ph[c] = p;
-      sumT += t;
+      // Relative exposure indices, not human dose estimates. Water shields organisms at depth.
+      const shielding = isWater[c] ? (cls[c] === CLS_DEEP ? 0.1 : 0.45) : 1;
+      this.radiation[c] = (this.rockRadiation[c] + 0.35 * (1 + al + Math.max(0, elev[c] - sea) * 2)) * shielding;
+      this.uv[c] = light[c] * Math.exp(-a.o2 / 4) * (isWater[c] ? (cls[c] === CLS_DEEP ? 0.05 : 0.35) : 1);
+      sumT += t * weight;
       ti[c] = clamp(Math.round((t + 40) * 2), 0, T_LUT - 1);
       pi[c] = Math.round(p * 10);
     }
-    this.meanTemp = sumT / N;
-    this.iceFrac = ice / N;
+    this.meanTemp = sumT / area;
+    this.iceFrac = ice / area;
+  }
+
+  advanceGeology(start: number, end: number): { dx: number; dy: number }[] {
+    const shifts = this.tectonics.advance(end - start, this.elev);
+    this.terrainVersion++;
+    for (let c = 0; c < N; c++) {
+      const src = this.tectonics.source[c];
+      this.baseMinerals[c] = src >= 0 ? this.crustMinerals[src] : 0.55;
+      this.basePh[c] = src >= 0 ? this.crustPh[src] : 7;
+      this.rockRadiation[c] = src >= 0 ? this.crustRadiation[src] : 0.35;
+      this.vent[c] = this.tectonics.activity[c];
+    }
+    this.orbitalForcing = 1.2 * meanCycle(start, end, 23000) + 1.5 * meanCycle(start, end, 41000) + 0.6 * meanCycle(start, end, 100000);
+    let volume = 0, area = 0;
+    for (let c = 0; c < N; c++) {
+      const weight = Math.cos(this.absLat[c] * Math.PI / 2);
+      const land = this.elev[c] >= this.seaLevel;
+      const target = land ? clamp((-this.temp[c] - 3) / 18, 0, 1) : 0;
+      this.ice[c] += (target - this.ice[c]) * (1 - Math.exp(-(end - start) / 100000));
+      volume += this.ice[c] * weight;
+      area += weight;
+    }
+    this.iceSeaLevel = -0.12 * Math.min(1, volume / area / 0.15);
+    this.updateGeography();
+    this.updateClimate();
+    return shifts;
   }
 
   continentName(c: number): string {
@@ -371,7 +433,7 @@ export class World {
     const m = this.moist[c];
     const can = this.canopy[c];
     const cov = this.cover[c];
-    const high = this.elev[c] - this.atm.seaLevel > 0.6;
+    const high = this.elev[c] - this.seaLevel > 0.6;
     if (t < -8) return 'Ice sheet';
     if (this.char[c] > 0.5) return 'Burnt land';
     if (can > 0.55) {

@@ -1,7 +1,7 @@
 # Evolution Simulator
 
 A god game about evolution. A procedurally generated world starts with a single kind of microbe at
-the deep-sea vents; over a million years it mutates, speciates and spreads. You are God: you shape the
+the deep-sea vents; over four billion years it mutates, speciates and spreads. You are God: you shape the
 air, the climate and the land, and life adapts to whatever you make.
 
 ## Run it
@@ -57,12 +57,12 @@ Then open http://localhost:5173. `npm run build` produces a static site in `dist
 - **Guided tour**: offered on the start screen the first time, and from the help screen at any time.
 - **Keys**: `Space` pause, `1`–`3` speed, `+`/`−`/`0` zoom, arrow keys pan, `Esc` put the current power down.
 
-Time runs fastest in the age of microbes and slows as life becomes complex.
+The geological clock spans four billion years. Short ecological episodes are sampled within each epoch; individual fires and infections do not last millions of years. See [the scientific model and its limits](docs/science.md).
 
 ## How the simulation works
 
 The world is a 160×90 grid (wrapping east–west). Each cell has elevation, temperature, rainfall, pH and
-minerals, derived from the terrain and the state of the atmosphere.
+minerals, derived from moving crust and the atmosphere. Radiation, UV and tectonic activity have separate map layers. Regional genetic variants respond to selection and mix through approximate gene flow.
 
 Every species has a genome: complexity tier, diet, habitat, body size, climate preferences and traits
 such as horns, armor, speed, grasping limbs, insulation, flight, sociality, intelligence, immunity,
@@ -78,15 +78,19 @@ community of its birthplace (invasion fitness), so adaptation is real natural se
 script: plants grow tall where rain allows and shade out rivals, prey evolves the defence that works in
 its landscape, and horns that help on the open savanna become a liability under a forest canopy.
 
-Oxygen gates complexity: photosynthesis fills the air, complex cells, bodies, land life and large
-animals each need more of it, and land plants produce the most. Photosynthesis also draws down CO₂ and
-cools the planet, so a blooming biosphere can tip the world into an ice age.
+Carbon moves between atmosphere, ocean, buried organic matter and rock. Net burial supplies oxygen after an initial reducing sink is depleted; oxidation consumes it. Ice changes albedo and sea level. Plate motion and carbon transfers use elapsed geological time explicitly.
+
+Viruses have acute, genotoxic or retroviral effects. Outbreaks select standing resistance locally;
+somatic damage is not inherited, and rare retroviral variation attempts are subject to selection.
+
+Run `npm test` for model regression checks and `npm run science:survey` for three complete seeded worlds.
 
 ### Code layout
 
 | Path | What |
 | --- | --- |
-| `src/sim/world.ts` | Terrain generation, climate, continents |
+| `src/sim/world.ts` | Terrain generation, climate, radiation, ice and continents |
+| `src/sim/earth.ts` | Plate kinematics, orbital averaging and carbon reservoirs |
 | `src/sim/genome.ts` | Genome, mutation, environmental responses, naming |
 | `src/sim/species.ts` | Derived stats and species interactions |
 | `src/sim/simulation.ts` | The step loop: populations, speciation, atmosphere, disasters, goals |

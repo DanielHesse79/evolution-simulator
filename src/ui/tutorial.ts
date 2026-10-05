@@ -35,8 +35,8 @@ const STEPS: Step[] = [
   },
   {
     target: ['.clock', '#speed'],
-    title: 'A million years',
-    text: 'Time races in the age of microbes and slows down as life grows complex. Space pauses; 1, 2 and 3 set the speed.',
+    title: 'Four billion years',
+    text: 'Geological epochs span millions of years. Between them, the game samples short episodes of growth, selection and infection; an outbreak does not last for an entire epoch. Space pauses; 1, 2 and 3 set the speed.',
   },
   {
     target: ['#species-panel'],

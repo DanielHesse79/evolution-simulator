@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "sim": "tsx scripts/headless.ts"
+    "sim": "tsx scripts/headless.ts",
+    "test": "node --import tsx --test --test-isolation=none scripts/science.test.ts",
+    "science:survey": "tsx scripts/science-survey.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

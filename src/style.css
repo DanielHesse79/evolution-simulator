@@ -1,12 +1,12 @@
 :root {
-  --bg: #080c18;
-  --panel: #101728;
-  --panel-2: #162036;
-  --line: #22304f;
-  --text: #dbe4f5;
-  --muted: #8794b3;
-  --gold: #f2c14e;
-  --teal: #4fd1c5;
+  --bg: #090f12;
+  --panel: #111d21;
+  --panel-2: #1a2a2e;
+  --line: #2b4044;
+  --text: #e4e9e0;
+  --muted: #9aafad;
+  --gold: #dfc28b;
+  --teal: #8ac9b3;
   --danger: #ef6461;
   --serif: 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
   --sans: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
@@ -35,11 +35,11 @@ button {
 #app {
   height: 100vh;
   display: grid;
-  grid-template-columns: 272px minmax(0, 1fr) 330px;
-  grid-template-rows: 54px minmax(0, 1fr);
-  gap: 8px;
-  padding: 8px;
-  background: radial-gradient(1200px 700px at 50% -10%, #17223f 0%, var(--bg) 60%);
+  grid-template-columns: 244px minmax(0, 1fr) 294px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 12px;
+  background: radial-gradient(ellipse at 45% 0%, #203438 0%, var(--bg) 70%);
 }
 
 /* ---------------------------------------------------------------- top bar */
@@ -48,8 +48,8 @@ button {
   grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  gap: 18px;
-  padding: 0 14px;
+  gap: 16px;
+  padding: 12px 16px;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -62,8 +62,9 @@ button {
 }
 
 .brand .globe {
-  font-size: 26px;
-  filter: drop-shadow(0 0 8px rgba(79, 209, 197, 0.5));
+  flex: none;
+  width: 34px;
+  height: 34px;
 }
 
 .brand h1 {
@@ -219,14 +220,15 @@ aside {
 }
 
 .panel {
-  background: var(--panel);
+  background: linear-gradient(135deg, #162429, var(--panel));
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 10px 12px 12px;
+  padding: 14px 12px;
+  box-shadow: 0 4px 18px #00000018, inset 0 1px #ffffff04;
 }
 
 .panel h2 {
-  margin: 0 0 8px;
+  margin: 0 0 12px;
   font: 600 11px/1 var(--sans);
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -246,8 +248,8 @@ aside {
   flex-direction: column;
   align-items: center;
   gap: 1px;
-  padding: 6px 2px 5px;
-  background: var(--panel-2);
+  padding: 8px 2px 7px;
+  background: linear-gradient(155deg, #213438, #152327);
   border: 1px solid var(--line);
   border-radius: 8px;
   line-height: 1.15;
@@ -272,8 +274,8 @@ aside {
 
 .power.on {
   border-color: var(--gold);
-  background: #2a2412;
-  box-shadow: 0 0 0 1px var(--gold) inset;
+  background: #34362a;
+  box-shadow: 0 0 16px #dfc28b10, inset 0 0 0 1px #dfc28b40;
 }
 
 .power.poor {
@@ -383,19 +385,18 @@ input[type='range'] {
 }
 
 #layers {
-  position: absolute;
-  top: 8px;
-  left: 8px;
+  width: 100%;
   display: flex;
-  gap: 4px;
+  gap: 5px;
   flex-wrap: wrap;
+  flex: none;
 }
 
 #layers button {
-  padding: 3px 8px;
-  background: rgba(10, 15, 28, 0.78);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 14px;
+  padding: 5px 9px;
+  background: #152529;
+  border: 1px solid var(--line);
+  border-radius: 6px;
   font-size: 11.5px;
   backdrop-filter: blur(4px);
 }
@@ -494,7 +495,8 @@ input[type='range'] {
   display: grid;
   grid-template-columns: 74px 22px 1fr;
   gap: 4px;
-  padding: 2px 0;
+  padding: 7px 0;
+  border-bottom: 1px solid #9aafad12;
   color: var(--muted);
 }
 
@@ -802,8 +804,8 @@ input[type='range'] {
   display: none;
   align-items: center;
   justify-content: center;
-  background: rgba(4, 6, 14, 0.78);
-  backdrop-filter: blur(5px);
+  background: rgba(4, 10, 12, 0.84);
+  backdrop-filter: blur(12px);
   z-index: 50;
 }
 
@@ -816,7 +818,7 @@ input[type='range'] {
   max-height: 92vh;
   overflow-y: auto;
   padding: 28px 32px;
-  background: linear-gradient(180deg, #151f38, #0e1526);
+  background: linear-gradient(145deg, #1d3034, #101c20);
   border: 1px solid var(--line);
   border-radius: 14px;
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
@@ -890,7 +892,7 @@ input[type='range'] {
 
 .goalcard.on {
   border-color: var(--gold);
-  background: #2a2412;
+  background: #32362b;
 }
 
 .seedrow {
@@ -1273,13 +1275,14 @@ input[type='range'] {
 /* --------------------------------------------------------------- pictures */
 
 .sp {
-  grid-template-columns: 40px 1fr 54px;
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+  padding: 7px 5px;
 }
 
 .sp .thumb,
 .site-sp img {
-  width: 40px;
-  height: 30px;
+  width: 48px;
+  height: 36px;
   border-radius: 5px;
   object-fit: cover;
   background: #0a1020;
@@ -1433,7 +1436,7 @@ input[type='range'] {
 
 .site-sp {
   display: grid;
-  grid-template-columns: 40px 1fr 36px;
+  grid-template-columns: 48px minmax(0, 1fr) 36px;
   align-items: center;
   gap: 6px;
   padding: 2px 4px;

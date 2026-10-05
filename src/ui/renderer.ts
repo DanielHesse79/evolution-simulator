@@ -1,8 +1,9 @@
 import { H, N, W } from '../sim/world';
 import { MAXS, VOLCANO_LIFE, type Sim } from '../sim/simulation';
 import type { Species } from '../sim/species';
+import { paintLandscapeSprite } from './landscape';
 
-export type Layer = 'terrain' | 'temp' | 'moist' | 'ph' | 'minerals' | 'flora' | 'fauna' | 'richness';
+export type Layer = 'terrain' | 'temp' | 'moist' | 'ph' | 'minerals' | 'flora' | 'fauna' | 'richness' | 'radiation' | 'uv' | 'tectonics';
 
 type RGB = [number, number, number];
 type Stops = [number, RGB][];
@@ -57,12 +58,15 @@ export const LAYERS: { id: Layer; name: string; icon: string; legend?: { css: st
   { id: 'moist', name: 'Rainfall', icon: '💧', legend: { css: gradientCss(MOIST_STOPS), lo: 'arid', hi: 'drenched' } },
   { id: 'ph', name: 'Acidity', icon: '🧪', legend: { css: gradientCss(PH_STOPS), lo: 'pH 3', hi: 'pH 10' } },
   { id: 'minerals', name: 'Minerals', icon: '💎', legend: { css: gradientCss(MINERAL_STOPS), lo: 'poor', hi: 'rich' } },
+  { id: 'radiation', name: 'Radiation', icon: '☢️', legend: { css: gradientCss(MINERAL_STOPS), lo: 'low exposure', hi: 'high · relative' } },
+  { id: 'uv', name: 'UV', icon: '☀️', legend: { css: gradientCss(MINERAL_STOPS), lo: 'shielded', hi: 'exposed' } },
+  { id: 'tectonics', name: 'Tectonics', icon: '🌋', legend: { css: gradientCss(MINERAL_STOPS), lo: 'quiet crust', hi: 'active boundaries' } },
   { id: 'flora', name: 'Flora', icon: '🌿' },
   { id: 'fauna', name: 'Fauna', icon: '🐾' },
   { id: 'richness', name: 'Diversity', icon: '🧬', legend: { css: gradientCss(RICH_STOPS), lo: '0', hi: '24+ species' } },
 ];
 
-const DS = 5; // display pixels per simulation cell
+const DS = 6; // display pixels per simulation cell
 const out: RGB = [0, 0, 0];
 
 function ramp(stops: Stops, v: number): RGB {
@@ -117,10 +121,12 @@ function getSprite(icon: string, px: number): Sprite {
     const pad = Math.ceil(size * 0.25);
     c.width = c.height = size + pad * 2;
     const x = c.getContext('2d')!;
-    x.font = `${size}px ${EMOJI_FONT}`;
-    x.textAlign = 'center';
-    x.textBaseline = 'middle';
-    x.fillText(icon, c.width / 2, c.height / 2 + size * 0.06);
+    if (!paintLandscapeSprite(x, icon, c.width, size)) {
+      x.font = `${size}px ${EMOJI_FONT}`;
+      x.textAlign = 'center';
+      x.textBaseline = 'middle';
+      x.fillText(icon, c.width / 2, c.height / 2 + size * 0.06);
+    }
     s = { c, size };
     sprites.set(key, s);
   }
@@ -171,6 +177,7 @@ export class MapRenderer {
   private img: ImageData;
   private hElev: Float32Array;
   private hShade: Float32Array;
+  private grain: Float32Array;
   private x0 = new Int32Array(W * DS);
   private x1 = new Int32Array(W * DS);
   private fx = new Float32Array(W * DS);
@@ -186,6 +193,7 @@ export class MapRenderer {
   private effectStart = new Map<number, number>();
   /** Region borders as segments [x1, y1, x2, y2, regionA, regionB] in cell units. */
   private borders: number[] = [];
+  private cachedGeo = -1;
 
   constructor(
     private map: HTMLCanvasElement,
@@ -206,36 +214,11 @@ export class MapRenderer {
     this.rangeCtx = this.rangeCanvas.getContext('2d')!;
     this.rangeImg = this.rangeCtx.createImageData(W, H);
 
-    // the borders between regions, found once
-    const ro = sim.regionOf;
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        const c = y * W + x;
-        const e = y * W + ((x + 1) % W);
-        if (ro[e] !== ro[c]) this.borders.push(x + 1, y, x + 1, y + 1, ro[c], ro[e]);
-        if (y < H - 1 && ro[c + W] !== ro[c]) this.borders.push(x, y + 1, x + 1, y + 1, ro[c], ro[c + W]);
-      }
-    }
-
-    // high-resolution relief: the simulation grid is coarse, but the coastline need not look it
     const { DW, DH } = this;
-    const w = sim.world;
     this.hElev = new Float32Array(DW * DH);
     this.hShade = new Float32Array(DW * DH);
-    for (let py = 0; py < DH; py++) {
-      const v = (py + 0.5) / DH;
-      for (let px = 0; px < DW; px++) this.hElev[py * DW + px] = w.elevAt((px + 0.5) / DW, v);
-    }
-    for (let py = 0; py < DH; py++) {
-      for (let px = 0; px < DW; px++) {
-        const l = this.hElev[py * DW + ((px + DW - 1) % DW)];
-        const r = this.hElev[py * DW + ((px + 1) % DW)];
-        const u = this.hElev[Math.max(0, py - 1) * DW + px];
-        const d = this.hElev[Math.min(DH - 1, py + 1) * DW + px];
-        const s = 1 + (l - r + (u - d)) * 7;
-        this.hShade[py * DW + px] = s < 0.72 ? 0.72 : s > 1.28 ? 1.28 : s;
-      }
-    }
+    this.grain = new Float32Array(DW * DH);
+    this.refreshGeography();
     for (let px = 0; px < DW; px++) {
       const f = (px + 0.5) / DS - 0.5;
       const i = Math.floor(f);
@@ -250,6 +233,48 @@ export class MapRenderer {
       this.y1[py] = Math.min(H - 1, i + 1);
       this.fy[py] = f - i;
     }
+  }
+
+  private refreshGeography(): void {
+    // Coastlines and administrative regions follow the evolving world.
+    this.borders.length = 0;
+    const sim = this.sim;
+    const ro = sim.regionOf;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const c = y * W + x;
+        const e = y * W + ((x + 1) % W);
+        if (ro[e] !== ro[c]) this.borders.push(x + 1, y, x + 1, y + 1, ro[c], ro[e]);
+        if (y < H - 1 && ro[c + W] !== ro[c]) this.borders.push(x, y + 1, x + 1, y + 1, ro[c], ro[c + W]);
+      }
+    }
+
+    // high-resolution relief: the simulation grid is coarse, but the coastline need not look it
+    const { DW, DH } = this;
+    const w = sim.world;
+    for (let py = 0; py < DH; py++) {
+      const v = (py + 0.5) / DH;
+      for (let px = 0; px < DW; px++) this.hElev[py * DW + px] = w.elevAt((px + 0.5) / DW, v);
+    }
+    for (let py = 0; py < DH; py++) {
+      for (let px = 0; px < DW; px++) {
+        const l = this.hElev[py * DW + ((px + DW - 1) % DW)];
+        const r = this.hElev[py * DW + ((px + 1) % DW)];
+        const u = this.hElev[Math.max(0, py - 1) * DW + px];
+        const d = this.hElev[Math.min(DH - 1, py + 1) * DW + px];
+        // A north-west light, with broad slopes as well as fine relief. The
+        // restrained contrast keeps bare mountains from looking metallic.
+        const farL = this.hElev[py * DW + ((px + DW - 4) % DW)];
+        const farR = this.hElev[py * DW + ((px + 4) % DW)];
+        const farU = this.hElev[Math.max(0, py - 4) * DW + px];
+        const farD = this.hElev[Math.min(DH - 1, py + 4) * DW + px];
+        const s = 1 + (l - r + u - d) * 3.8 + (farL - farR + farU - farD) * 0.65;
+        this.hShade[py * DW + px] = clamp(s, 0.79, 1.2);
+        this.grain[py * DW + px] = (hash(py * DW + px, 97) - 0.5) * 3;
+      }
+    }
+    this.cachedGeo = this.sim.world.geoVersion;
+    this.rangeKey = '';
   }
 
   // -------------------------------------------------------------------------
@@ -353,16 +378,16 @@ export class MapRenderer {
   private terrainColors(): void {
     const w = this.sim.world;
     const { land, water } = this;
-    const sea = w.atm.seaLevel;
+    const sea = w.seaLevel;
     for (let c = 0; c < N; c++) {
       const t = w.temp[c];
       const isW = w.isWater[c] === 1;
       const m = isW ? 0.5 : w.moist[c];
       const dry = clamp01((0.62 - m) / 0.5);
       // bare ground: dark wet rock to pale sand
-      let r = 112 + (206 - 112) * dry;
-      let g = 104 + (182 - 104) * dry;
-      let b = 94 + (138 - 94) * dry;
+      let r = 115 + (207 - 115) * dry;
+      let g = 120 + (188 - 120) * dry;
+      let b = 106 + (145 - 106) * dry;
       if (!isW) {
         const hgt = clamp01((w.elev[c] - sea - 0.5) / 0.35);
         r += (128 - r) * hgt * 0.7;
@@ -373,9 +398,9 @@ export class MapRenderer {
         if (cov > 0.01) {
           // ground cover: lush green where wet, straw where dry, dull olive in the cold
           const cold = clamp01((6 - t) / 12);
-          let gr = 92 + (176 - 92) * dry;
-          let gg = 152 + (166 - 152) * dry;
-          let gb = 62 + (84 - 62) * dry;
+          let gr = 89 + (177 - 89) * dry;
+          let gg = 143 + (167 - 143) * dry;
+          let gb = 91 + (105 - 91) * dry;
           gr += (122 - gr) * cold;
           gg += (132 - gg) * cold;
           gb += (92 - gb) * cold;
@@ -491,7 +516,10 @@ export class MapRenderer {
       return;
     }
     for (let c = 0; c < N; c++) {
-      if (layer === 'temp') set(c, ramp(TEMP_STOPS, w.temp[c]));
+      if (layer === 'radiation') set(c, ramp(MINERAL_STOPS, w.radiation[c] / 3));
+      else if (layer === 'uv') set(c, ramp(MINERAL_STOPS, w.uv[c]));
+      else if (layer === 'tectonics') set(c, ramp(MINERAL_STOPS, w.tectonics.activity[c]));
+      else if (layer === 'temp') set(c, ramp(TEMP_STOPS, w.temp[c]));
       else if (layer === 'ph') set(c, ramp(PH_STOPS, w.ph[c]));
       else if (layer === 'moist') {
         if (w.isWater[c]) {
@@ -514,13 +542,14 @@ export class MapRenderer {
   }
 
   renderBase(): void {
+    if (this.cachedGeo !== this.sim.world.geoVersion) this.refreshGeography();
     const terrain = this.layer === 'terrain';
     if (terrain) this.terrainColors();
     else this.dataColors();
 
     const { DW, DH, land, water, hElev, hShade, x0, x1, fx, y0, y1, fy } = this;
     const data = this.img.data;
-    const sea = this.sim.world.atm.seaLevel;
+    const sea = this.sim.world.seaLevel;
     let p = 0;
     for (let py = 0; py < DH; py++) {
       const r0 = y0[py] * W;
@@ -550,19 +579,23 @@ export class MapRenderer {
             let k = d * 2.4;
             if (k > 1) k = 1;
             k = Math.sqrt(k);
-            r = 66 + (13 - 66) * k;
-            g = 142 + (36 - 142) * k;
-            b = 178 + (84 - 178) * k;
+            r = 88 + (19 - 88) * k;
+            g = 164 + (53 - 164) * k;
+            b = 162 + (73 - 162) * k;
+            const relief = (hShade[p] - 1) * 0.22;
+            r *= 1 + relief;
+            g *= 1 + relief;
+            b *= 1 + relief;
             if (a > 0.004) {
               r += (tr - r) * a;
               g += (tg - g) * a;
               b += (tb - b) * a;
             }
-            if (d < 0.009) {
-              r += 34;
-              g += 34;
-              b += 28;
-            }
+            // Fade the surf towards shore instead of a hard bright pixel edge.
+            const surf = clamp01(1 - d / 0.012) * (1 - a);
+            r += (183 - r) * surf * 0.52;
+            g += (215 - g) * surf * 0.52;
+            b += (193 - b) * surf * 0.52;
           } else {
             const k = d < 0.008 ? 0.45 : 0.82;
             r = tr * k;
@@ -574,6 +607,19 @@ export class MapRenderer {
           r = (land[c00 * 3] * w00 + land[c10 * 3] * w10 + land[c01 * 3] * w01 + land[c11 * 3] * w11) * sh;
           g = (land[c00 * 3 + 1] * w00 + land[c10 * 3 + 1] * w10 + land[c01 * 3 + 1] * w01 + land[c11 * 3 + 1] * w11) * sh;
           b = (land[c00 * 3 + 2] * w00 + land[c10 * 3 + 2] * w10 + land[c01 * 3 + 2] * w01 + land[c11 * 3 + 2] * w11) * sh;
+          if (terrain) {
+            const coast = clamp01(1 - (e - sea) / 0.014) * 0.38;
+            const cold = this.sim.world.temp[c00] < -2;
+            if (!cold) {
+              r += (215 - r) * coast;
+              g += (201 - g) * coast;
+              b += (161 - b) * coast;
+            }
+            const texture = this.grain[p];
+            r += texture;
+            g += texture;
+            b += texture;
+          }
         }
         const i = p * 4;
         data[i] = r;
@@ -694,9 +740,11 @@ export class MapRenderer {
         const half = ctx.measureText(label).width / 2 + 4 * dpr;
         const lx = Math.max(half, Math.min(cw - half, lx0));
         const ly = Math.max(size, Math.min(ch - size, ly0));
-        ctx.fillStyle = `rgba(0,0,0,${0.35 * labelAlpha})`;
-        ctx.fillText(label, lx + dpr, ly + dpr);
-        ctx.fillStyle = `rgba(255,255,255,${0.55 * labelAlpha})`;
+        ctx.strokeStyle = `rgba(17,39,39,${0.5 * labelAlpha})`;
+        ctx.lineWidth = 3 * dpr;
+        ctx.lineJoin = 'round';
+        ctx.strokeText(label, lx, ly);
+        ctx.fillStyle = `rgba(244,236,212,${0.86 * labelAlpha})`;
         ctx.fillText(label, lx, ly);
       }
     }
@@ -749,8 +797,8 @@ export class MapRenderer {
       }
       const b = this.borders;
       if (st.regions.borders) {
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
-        ctx.lineWidth = (1.1 * dpr) / k;
+        ctx.strokeStyle = 'rgba(227, 231, 207, 0.18)';
+        ctx.lineWidth = (0.8 * dpr) / k;
         ctx.beginPath();
         for (let i = 0; i < b.length; i += 6) {
           ctx.moveTo(b[i], b[i + 1]);
@@ -833,7 +881,7 @@ export class MapRenderer {
     const w = sim.world;
     const pop = sim.pop;
     const { hElev, DW, DH } = this;
-    const sea = w.atm.seaLevel;
+    const sea = w.seaLevel;
     const t = now / 1000;
     const dens = Math.max(0.12, Math.min(1, (this.zoom - 2) / 6));
     const xa = Math.max(0, Math.floor(x0));

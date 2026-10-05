@@ -1,6 +1,6 @@
 import { DIET_NAMES, HABITAT_NAMES, TIER_NAMES, TRAIT_KEYS, describe, habFactors, sanitize, traitInfo, formatHeadcount, formatMass, traitCap, type Kind } from '../sim/genome';
 import { GUIDE_COST, POWERS, canGuide, guideEvolution, usePower, type GuideKey, type PowerId } from '../sim/powers';
-import { DIFFICULTIES, GOALS, HIST_EVERY, MAXS, MAX_ENERGY, Sim, TOTAL_TICKS, yearAt, type AtmKey, type DifficultyId, type Forecast, type GoalId } from '../sim/simulation';
+import { DIFFICULTIES, GOALS, HIST_EVERY, MAXS, MAX_ENERGY, Sim, TOTAL_TICKS, yearAt, fmtYear, type AtmKey, type DifficultyId, type Forecast, type GoalId } from '../sim/simulation';
 import type { Genome } from '../sim/genome';
 import type { Species } from '../sim/species';
 import { CELL_EXAMPLES, buildCell } from './cell';
@@ -101,7 +101,7 @@ export class UI {
 
     $('atmos').innerHTML = ATM_UI.map(
       (a) => `<div class="atm" title="${a.hint}">
-        <div class="row"><label>${a.label}</label><span class="val" id="atm-val-${a.key}"></span></div>
+        <div class="row"><label for="atm-${a.key}">${a.label}</label><span class="val" id="atm-val-${a.key}"></span></div>
         <input type="range" min="0" max="1000" step="1" id="atm-${a.key}" data-key="${a.key}" />
       </div>`,
     ).join('');
@@ -204,7 +204,7 @@ export class UI {
     if (!sim) return;
 
     // top bar
-    $('year').textContent = `Year ${num(sim.year)}`;
+    $('year').textContent = fmtYear(sim.year);
     $('age').textContent = sim.age;
     $('timefill').style.width = `${Math.min(100, (sim.tick / TOTAL_TICKS) * 100)}%`;
     $('speed')
@@ -279,7 +279,7 @@ export class UI {
         const eq = sim.eq[d.key];
         const diff = eq - v;
         if (Math.abs(diff) > Math.max(0.15, Math.abs(v) * 0.04)) {
-          trend = `<span class="trend" style="color:${diff > 0 ? '#ef9a61' : '#61b8ef'}" title="Drifting towards ${d.fmt(eq)}">${diff > 0 ? '▲' : '▼'}</span>`;
+          trend = `<span class="trend" style="color:${diff > 0 ? '#ef9a61' : '#61b8ef'}" title="Recent trend towards ${d.fmt(eq)}">${diff > 0 ? '▲' : '▼'}</span>`;
         }
       }
       $(`atm-val-${d.key}`).innerHTML = d.fmt(v) + trend;
@@ -298,7 +298,11 @@ export class UI {
       ['Dry land', `${Math.round(w.landFrac * 100)} %`],
       ['Living species', `${sim.nAlive}`],
       ['Ever lived', `${sim.species.length}`],
-      ['Time flow', `${num(perTick)} yr / step`],
+      ['Geological epoch', `${(perTick / 1e6).toFixed(2)} million yr`],
+      ['Ecology', 'Sampled generations'],
+      ['Moving plates', `${w.tectonics.plates.length} · 1–7 cm/yr`],
+      ['Sea level with ice', `${Math.round(w.seaLevel * 1000)} m`],
+      ['Buried carbon', `${Math.round(sim.carbon.organic)} units`],
     ];
     $('worldstats').innerHTML = rows.map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join('');
     $('spcount').textContent = `· ${kinds.animal} animals · ${kinds.plant} plants · ${kinds.microbe} microbes`;
@@ -315,7 +319,6 @@ export class UI {
     let html = '';
     for (const [kind, title] of groups) {
       if (this.tab !== 'all' && this.tab !== kind) continue;
-      if (this.tab === 'all' && kind === 'microbe' && sim.seaSettled) continue;
       const list = sim.alive
         .filter((s) => s.kind === kind)
         .sort((a, b) => (this.sortBy === 'size' ? b.genome.size - a.genome.size : this.sortBy === 'newest' ? b.bornTick - a.bornTick : b.totalPop - a.totalPop));
@@ -385,13 +388,13 @@ export class UI {
     const gn = sp.genome;
     const parent = sim.species[sp.parentId];
     const facts: [string, string][] = [];
-    facts.push(['Appeared', `year ${num(sp.bornYear)}${parent ? ` from <a data-parent="${parent.id}">${parent.name}</a>` : ''}`]);
+    facts.push(['Appeared', `${fmtYear(sp.bornYear)}${parent ? ` from <a data-parent="${parent.id}">${parent.name}</a>` : ''}`]);
     if (sp.alive) {
       facts.push(['Numbers', `${formatHeadcount(sp.totalPop, gn.size)}`]);
       facts.push(['Range', this.rangeText(sp)]);
       if (sp.declineReason && sp.totalPop < 0.55 * sp.peakPop) facts.push(['Declining', `<span class="warn">⚠ ${sp.declineReason}</span>`]);
     } else {
-      facts.push(['Vanished', `year ${num(sp.diedYear)}`]);
+      facts.push(['Vanished', `${fmtYear(sp.diedYear)}`]);
       if (sp.deathCause) facts.push(['Why', `<span class="warn">${sp.deathCause}</span>`]);
     }
     facts.push(['Body', `about ${formatMass(gn.size)}`]);
@@ -496,7 +499,7 @@ export class UI {
       const div = document.createElement('div');
       div.className = `ev${ev.major ? ' major' : ''}${ev.speciesId !== undefined ? ' link' : ''}`;
       if (ev.speciesId !== undefined) div.dataset.sp = String(ev.speciesId);
-      div.innerHTML = `<span class="yr">${num(ev.year)}</span><span class="ic">${ev.icon}</span><span class="tx">${ev.text}</span>`;
+      div.innerHTML = `<span class="yr">${ev.year >= 1e9 ? (ev.year / 1e9).toFixed(2) + ' bn yr' : (ev.year / 1e6).toFixed(1) + ' m yr'}</span><span class="ic">${ev.icon}</span><span class="tx">${ev.text}</span>`;
       frag.appendChild(div);
     }
     log.prepend(frag);
@@ -566,11 +569,13 @@ export class UI {
     let diff: DifficultyId = 'normal';
     let goal: GoalId = 'awakening';
     const m = this.openModal(
-      `<div class="card">
-        <div class="hero">🌍</div>
+      `<div class="card start-card">
+        <div class="genesis-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="atlas-orb"></div><span class="genesis-caption">ONE WORLD. A MILLION POSSIBILITIES.</span></div>
+        <div class="start-content">
+        <div class="eyebrow">A natural history, written by you</div>
         <h1>Evolution</h1>
         <p class="tag">A young world, a warm sea, and one kind of microbe clinging to the vents.<br>
-        You are God. You have a million years. Shape the air, the rain and the rock, send fire and plague,
+        You are God. You have four billion years. Shape the air, the rain and the rock, send fire and plague,
         carry creatures across oceans, and see what life makes of it.</p>
         <h3>Choose your purpose</h3>
         <div class="goals">${GOALS.map((x) => `<button class="goalcard${x.id === goal ? ' on' : ''}" data-goal="${x.id}"><span class="gi">${x.icon}</span><div><b>${x.name}</b><span>${x.blurb}</span></div></button>`).join('')}</div>
@@ -581,6 +586,7 @@ export class UI {
         <div class="btnrow">
           ${hasWorld ? '<button class="secondary" id="cancel">Back to my world</button>' : ''}
           <button class="primary" id="begin">Let there be life</button>
+        </div>
         </div>
       </div>`,
       hasWorld,
@@ -660,6 +666,10 @@ export class UI {
         <h3>Your powers</h3>
         <ul>
           <li><b>Air, Sun &amp; Sea:</b> drag a slider to set it. The living world keeps pulling the air back towards its own balance (the small arrows show which way).</li>
+          <li><b>Deep time:</b> four billion years, with short ecological episodes sampled between geological updates. Fires and infections illustrate events within an epoch; they do not last millions of years.</li>
+          <li><b>A changing world:</b> plates carry continents, glaciers lower sea levels, and carbon moves between air, ocean, buried organic matter and rock. The Radiation, UV and Tectonics layers reveal local conditions.</li>
+          <li><b>Evolution:</b> mutations are undirected. Local variants, gene flow and selection change populations. Infections favour existing resistance; only retroviral episodes can occasionally contribute inherited insertions.</li>
+          <li><b>Model limits:</b> an exploratory game, not an Earth reconstruction. Plate motion, carbon units, species boundaries and the Mind goal are simplified. Radiation is a relative exposure index, not a dose measurement.</li>
           <li><b>Divine powers:</b> pick one, then click the map. Fire, rain and drought, minerals, acid, volcanoes, meteors, plagues and mutagens.</li>
           <li><b>The Ark:</b> select a species, choose Ark, click another continent. Newcomers can be devastating to creatures that evolved without them.</li>
           <li><b>Guided evolution:</b> select a species and press ＋ or − on a trait. A daughter species with that change is born. Whether she survives is up to the world you made.</li>
@@ -673,7 +683,7 @@ export class UI {
           <li><b>Stats:</b> press <b>📊 Stats</b> on a species to see how it spread, what killed it, what ate it and what it ate. When a species dies out, the Chronicle tells you why.</li>
           <li><b>Field guide (📖)</b> has a picture of every species, living and extinct. <b>🔊</b> switches between sound with music, effects only, and silence.</li>
         </ul>
-        <p>Everything costs <b>divine energy</b>, which returns slowly. Time runs fastest in the age of microbes and slows as life grows complex. <b>Space</b> pauses, <b>1–3</b> set the speed, <b>Esc</b> puts your powers down.</p>
+        <p>Everything costs <b>divine energy</b>, which returns slowly. The clock tracks geological epochs; short ecological episodes are sampled within them. <b>Space</b> pauses, <b>1–3</b> set the speed, <b>Esc</b> puts your powers down.</p>
         <div class="btnrow"><button class="secondary" id="cells">🔬 Cells compared</button><button class="secondary" id="tour">🧭 Guided tour</button><button class="primary" id="ok">Back to the world</button></div>
       </div>`,
       true,
@@ -742,6 +752,7 @@ export class UI {
     let land = 0;
     let forest = 0;
     let grass = 0;
+    let radiation = 0, uv = 0, areaKm2 = 0;
     for (const c of cells) {
       for (const sp of sim.alive) {
         const p = sim.pop[c * MAXS + sp.slot];
@@ -750,6 +761,8 @@ export class UI {
       const b = w.biomeName(c);
       biomes.set(b, (biomes.get(b) ?? 0) + 1);
       t += w.temp[c];
+      radiation += w.radiation[c]; uv += w.uv[c];
+      areaKm2 += 510072000 / (2 * W) * (Math.sin(Math.PI * (0.5 - Math.floor(c / W) / H)) - Math.sin(Math.PI * (0.5 - (Math.floor(c / W) + 1) / H)));
       ph += w.ph[c];
       if (!w.isWater[c]) {
         land++;
@@ -768,8 +781,8 @@ export class UI {
         ? `${topBiomes
             .slice(0, 2)
             .map(([b, k]) => `${b} ${Math.round((k / n) * 100)}%`)
-            .join(', ')} · ${(n * 62500).toLocaleString('en-US')} km²`
-        : `${region.name} · ${Math.abs(lat).toFixed(0)}°${lat >= 0 ? 'N' : 'S'} · about ${(pl.radius * 2 + 1) * 250} km across`;
+            .join(', ')} · ${Math.round(areaKm2).toLocaleString('en-US')} km²`
+        : `${region.name} · ${Math.abs(lat).toFixed(0)}°${lat >= 0 ? 'N' : 'S'} · about ${Math.round(areaKm2).toLocaleString('en-US')} km²`;
 
     // the living things, grouped the way a naturalist would
     const animals = [...tot.keys()].filter((sp) => sp.kind === 'animal');
@@ -781,7 +794,7 @@ export class UI {
       ['Grass, herbs, moss & algae', plants.filter((sp) => sp.derived.tall <= 0.3)],
       ['Microbes', [...tot.keys()].filter((sp) => sp.kind === 'microbe')],
     ];
-    let list = '';
+    let list = `<p class="hint">Ionizing exposure ${(radiation / n).toFixed(2)} · UV ${(uv / n).toFixed(2)} <small>(relative indices)</small></p>`;
     for (const [name, sps] of groups) {
       if (!sps.length) continue;
       sps.sort((a, b) => tot.get(b)! - tot.get(a)!);
@@ -822,11 +835,13 @@ export class UI {
       const key = `${sel.id}|${pl.cell}|${pl.radius}|${Math.floor(sim.tick / 10)}|${sel.genome.size}`;
       if (this.siteForecast.key !== key) this.siteForecast = { key, f: sim.forecast(sel.genome, cells, sel, 8) };
       const fc = this.siteForecast.f!;
+      const local = sim.localGenome(sel, pl.cell);
       const here = tot.get(sel) ?? 0;
       const share = sel.totalPop > 0 ? here / sel.totalPop : 0;
       fit = `<div class="site-fit">
         <div><span class="stars">${'★'.repeat(fc.stars)}${'☆'.repeat(5 - fc.stars)}</span> for <i>${sel.name}</i>${share > 0.005 ? ` <small>(${Math.round(share * 100)}% of them live here)</small>` : ''}</div>
         <small>${fc.notes.join(' · ') || 'nothing in particular stands in its way'}</small>
+        ${sim.pop[pl.cell * MAXS + sel.slot] > 0.02 ? `<small>Local variant at this spot: ${local.tempOpt.toFixed(1)} °C preference · pH ${local.phOpt.toFixed(1)} · inherited resistance ${Math.round(local.immunity * 100)}%</small>` : ''}
         ${fc.stars >= 1 && fc.bestCell >= 0 && share < 0.5 ? `<button data-site="bring">🕊️ Bring a band of them here (${sim.price(20)}⚡)</button>` : ''}
       </div>`;
     }
@@ -1102,7 +1117,7 @@ export class UI {
       <div class="stat-legend"><span><i style="background:${col}"></i>Numbers (peak ${formatHeadcount(sp.peakPop, gn.size)})</span><span><i class="dash"></i>Range in map squares (each about 250 km across)</span></div>`;
     }
     const reached = sp.reached.length
-      ? `<div class="stat-reach">${sp.reached.map((r, i) => `${i ? '→ ' : ''}<b>${r.name}</b> <small>year ${num(r.year)}</small>`).join(' ')}</div>`
+      ? `<div class="stat-reach">${sp.reached.map((r, i) => `${i ? '→ ' : ''}<b>${r.name}</b> <small>${fmtYear(r.year)}</small>`).join(' ')}</div>`
       : gn.habitat === 'aquatic'
         ? '<div class="stat-reach">Lives in the sea.</div>'
         : '';
@@ -1123,7 +1138,7 @@ export class UI {
         <div class="stat-causes">${causes.filter((c) => c[1] / totalLoss > 0.004).map((c) => `<span><i style="background:${c[2]}"></i>${c[0]} <b>${Math.round((c[1] / totalLoss) * 100)}%</b></span>`).join('')}</div>`
       : '<div class="site-empty">Nothing has killed any of them yet.</div>';
     const fate = !sp.alive
-      ? `<p class="stat-fate">💀 Died out in year ${num(sp.diedYear)}: ${sp.deathCause || 'unknown'}.</p>`
+      ? `<p class="stat-fate">💀 Died out in ${fmtYear(sp.diedYear)}: ${sp.deathCause || 'unknown'}.</p>`
       : sp.declineReason && sp.totalPop < 0.55 * sp.peakPop
         ? `<p class="stat-fate">⚠ Declining: ${sp.declineReason}.</p>`
         : '';
@@ -1151,7 +1166,7 @@ export class UI {
         <div class="stat-head">
           <img src="${this.picture(sp)}" alt="" />
           <div><h2><i>${sp.name}</i></h2><div>${sp.desc} · ${TIER_NAMES[gn.tier]} · ${DIET_NAMES[gn.diet]}</div>
-          <div class="sub">${sp.alive ? `${formatHeadcount(sp.totalPop, gn.size)} alive in ${sp.cells} squares` : 'Extinct'} · appeared year ${num(sp.bornYear)}</div></div>
+          <div class="sub">${sp.alive ? `${formatHeadcount(sp.totalPop, gn.size)} alive in ${sp.cells} squares` : 'Extinct'} · appeared ${fmtYear(sp.bornYear)}</div></div>
           <button class="secondary" id="close">Close</button>
         </div>
         <h3>Growth and spread</h3>
@@ -1209,7 +1224,7 @@ export class UI {
             (sp) => `<button class="gcard${sp.id === g.selectedId ? ' on' : ''}" data-gsp="${sp.id}">
               <img src="${this.picture(sp)}" alt="" />
               <i>${sp.name}</i><span>${sp.desc}</span>
-              <small>${sp.alive ? `${formatHeadcount(sp.totalPop, sp.genome.size)} · ${formatMass(sp.genome.size)}` : `year ${num(sp.bornYear)} – ${num(sp.diedYear)}`}</small>
+              <small>${sp.alive ? `${formatHeadcount(sp.totalPop, sp.genome.size)} · ${formatMass(sp.genome.size)}` : `${fmtYear(sp.bornYear)} – ${fmtYear(sp.diedYear)}`}</small>
               ${!sp.alive && sp.deathCause ? `<small class="warn">💀 ${sp.deathCause}</small>` : sp.alive && sp.declineReason && sp.totalPop < 0.55 * sp.peakPop ? `<small class="warn">⚠ ${sp.declineReason}</small>` : ''}
             </button>`,
           )
@@ -1292,4 +1307,3 @@ export class UI {
     });
   }
 }
-

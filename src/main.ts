@@ -1,4 +1,5 @@
 import './style.css';
+import './ui/atlas.css';
 import { POWERS, usePower, type PowerId } from './sim/powers';
 import { MAXS, Sim, type DifficultyId, type GoalId } from './sim/simulation';
 import { H, W } from './sim/world';
@@ -71,6 +72,7 @@ class App implements Game {
     this.bindMap();
     this.bindKeys();
     window.addEventListener('resize', () => this.fitMap());
+    new ResizeObserver(() => this.fitMap()).observe($('center'));
     this.fitMap();
     this.ui.showStart();
     requestAnimationFrame((t) => this.frame(t));
@@ -193,11 +195,13 @@ class App implements Game {
   private fitMap(): void {
     const center = $('center');
     const availW = center.clientWidth;
-    const availH = center.clientHeight - 150;
+    const toolbarHeight = $('layers').offsetHeight + (center.querySelector('.atlas-heading')?.clientHeight ?? 0) + 24;
+    const compact = window.matchMedia('(max-width: 900px)').matches;
+    const availH = compact ? availW * 9 / 16 : Math.max(100, center.clientHeight - toolbarHeight - 100);
     let w = availW;
     let h = (w * 9) / 16;
     if (h > availH) {
-      h = Math.max(200, availH);
+      h = Math.max(100, availH);
       w = (h * 16) / 9;
     }
     const wrap = $('mapwrap');
@@ -402,6 +406,8 @@ class App implements Game {
     const y = Math.floor(c / W);
     const lat = (0.5 - (y + 0.5) / H) * 180;
     const place = w.isWater[c] ? 'Ocean' : w.continentName(c);
+    const plateId = w.tectonics.owner[c];
+    const plate = w.tectonics.plates[plateId];
     const here = this.sim.speciesAt(c);
     const who = here
       .slice(0, 7)
@@ -412,6 +418,8 @@ class App implements Game {
       <div class="env">
         <span>🌡️ ${w.temp[c].toFixed(1)} °C</span><span>🧪 pH ${w.ph[c].toFixed(1)}</span>
         <span>💧 ${w.isWater[c] ? 'water' : `${Math.round(w.moist[c] * 100)} % rain`}</span><span>💎 ${Math.round(w.minerals[c] * 100)} % minerals</span>
+        <span>☢️ ${w.radiation[c].toFixed(2)} relative exposure</span><span>☀️ ${w.uv[c].toFixed(2)} relative UV</span>
+        <span>🌋 ${plate ? `Plate ${plateId + 1} · ${plate.speed.toFixed(1)} cm/yr` : 'New ocean crust'}</span>
       </div>
       <div class="who">${who || '<div style="color:var(--muted)">Lifeless</div>'}${here.length > 7 ? `<div style="color:var(--muted)">and ${here.length - 7} more</div>` : ''}</div>`;
     tip.style.display = 'block';

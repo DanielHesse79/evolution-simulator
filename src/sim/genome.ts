@@ -243,135 +243,41 @@ export interface MutEnv {
   tierOpen: boolean;
 }
 
-function proposeDiet(g: Genome, env: MutEnv, rng: RNG): Diet | null {
-  const opts: [Diet, number][] = [];
-  switch (g.diet) {
-    case 'chemo':
-      if (g.tier <= 1) {
-        opts.push(['photo', 3]);
-        if (env.hasAutoFood) opts.push(['herb', env.hasHerb ? 0.4 : 2.5]);
-      }
-      break;
-    case 'photo':
-      if (g.tier <= 1) opts.push(['herb', env.hasHerb ? 0.3 : 2]);
-      break;
-    case 'herb':
-      if (env.hasPrey) {
-        opts.push(['omni', 1]);
-        opts.push(['carn', env.hasCarn ? 0.4 : 2.5]);
-      }
-      break;
-    case 'omni':
-      if (env.hasPrey) opts.push(['carn', 1]);
-      if (env.hasAutoFood) opts.push(['herb', 1]);
-      break;
-    case 'carn':
-      if (env.hasAutoFood) opts.push(['omni', 1]);
-      break;
-  }
-  let total = 0;
-  for (const o of opts) total += o[1];
-  if (total <= 0 || !rng.chance(Math.min(1, total / 3))) return null;
-  let r = rng.next() * total;
-  for (const o of opts) {
-    r -= o[1];
-    if (r <= 0) return o[0];
-  }
-  return opts[opts.length - 1][0];
-}
-
-/**
- * Produce a mutated daughter genome adapted towards the conditions of a target cell.
- * Returns null when the lineage simply cannot make the leap (e.g. a microbe onto land).
- */
-export function mutate(parent: Genome, rng: RNG, env: MutEnv): { g: Genome; major: 'tier' | 'diet' | 'habitat' | null } | null {
-  const g: Genome = { ...parent };
+/** Variation is independent of local need. Ecology selects among the resulting proposals. */
+export function mutate(parent: Genome, rng: RNG, _env: MutEnv): { g: Genome; major: 'tier' | 'diet' | 'habitat' | null } | null {
+  const g = { ...parent };
   let major: 'tier' | 'diet' | 'habitat' | null = null;
-  const land = env.cls >= CLS_WET;
-  const landReady = g.diet !== 'chemo' && (isAuto(g) ? g.tier >= 2 : g.tier >= 3);
-  // chemosynthesis is a trick of single cells; it never builds a body
-  const maxTier = g.diet === 'chemo' ? 1 : 4;
-
-  if (env.parentHab <= 0.01) {
-    // the target cell is the wrong medium entirely: only a change of habitat will do
-    if (g.habitat === 'aquatic' && land) {
-      if (!landReady || env.o2 < LAND_O2 * 0.8) return null;
-      g.habitat = 'amphibious';
-      g.moistOpt = clamp(env.m, 0.3, 0.95);
-      g.moistTol = 0.3;
+  const roll = rng.next();
+  if (roll < 0.12 && g.tier < (g.diet === 'chemo' ? 1 : 4)) {
+    g.tier++;
+    g.size = Math.max(g.size, minSize(g));
+    major = 'tier';
+  } else if (roll < 0.26) {
+    const landReady = g.diet !== 'chemo' && (isAuto(g) ? g.tier >= 2 : g.tier >= 3);
+    if (g.habitat === 'amphibious') {
+      g.habitat = rng.chance(0.5) && landReady ? 'terrestrial' : 'aquatic';
       major = 'habitat';
-    } else if (g.habitat === 'terrestrial' && !land) {
-      if (!rng.chance(0.25)) return null;
+    } else if (landReady) {
       g.habitat = 'amphibious';
       major = 'habitat';
-    } else return null;
-  } else if (env.parentHab < 0.5 && g.habitat === 'amphibious' && rng.chance(0.2)) {
-    // marginal ground for a creature of the shore: commit to the dry land or to the open water
-    if (land && landReady) {
-      g.habitat = 'terrestrial';
-      major = 'habitat';
-    } else if (!land) {
-      g.habitat = 'aquatic';
-      major = 'habitat';
     }
-  } else {
-    const roll = rng.next();
-    if (roll < (env.tierOpen ? 0.25 : 0.05)) {
-      if (g.tier < maxTier && env.o2 >= TIER_O2[g.tier + 1]) {
-        g.tier++;
-        g.size = Math.max(g.size, minSize(g)) + rng.range(0, 0.4);
-        major = 'tier';
-      }
-    } else if (roll < 0.29) {
-      if (g.habitat === 'amphibious') {
-        if (land && landReady && rng.chance(0.7)) {
-          g.habitat = 'terrestrial';
-          major = 'habitat';
-        } else if (!land && rng.chance(0.3)) {
-          g.habitat = 'aquatic';
-          major = 'habitat';
-        }
-      } else if (g.habitat === 'terrestrial' && env.cls === CLS_WET && rng.chance(0.15)) {
-        g.habitat = 'amphibious';
-        major = 'habitat';
-      }
-    } else if (roll < 0.36) {
-      const nd = proposeDiet(g, env, rng);
-      if (nd) {
-        g.diet = nd;
-        major = 'diet';
-      }
-    }
+  } else if (roll < 0.38) {
+    const options: Diet[] = g.diet === 'chemo' ? ['photo', 'herb']
+      : g.diet === 'photo' ? (g.tier <= 1 ? ['herb'] : [])
+      : g.diet === 'herb' ? ['omni', 'carn']
+      : g.diet === 'omni' ? ['herb', 'carn'] : ['omni'];
+    if (options.length) { g.diet = rng.pick(options); major = 'diet'; }
   }
-
-  // adaptation towards local conditions, or plain drift
-  if (rng.chance(0.75)) g.tempOpt += (env.t - g.tempOpt) * rng.range(0.25, 0.8);
-  else g.tempOpt += rng.gauss() * 3;
-  if (rng.chance(0.6)) g.phOpt += (env.ph - g.phOpt) * rng.range(0.25, 0.8);
-  else g.phOpt += rng.gauss() * 0.3;
-  if (land && g.habitat !== 'aquatic') {
-    if (rng.chance(0.7)) g.moistOpt += (env.m - g.moistOpt) * rng.range(0.25, 0.8);
-    else g.moistOpt += rng.gauss() * 0.08;
-  }
-  if (rng.chance(0.25)) g.tempTol *= rng.range(0.8, 1.25);
-  if (rng.chance(0.2)) g.phTol *= rng.range(0.8, 1.25);
-  if (rng.chance(0.2)) g.moistTol *= rng.range(0.8, 1.25);
-  if (isAuto(g) && g.habitat !== 'aquatic' && g.tier >= 2) {
-    // land plants race upwards for light wherever there is water to spare, and shrink where it is dry
-    const need = 0.1 + 0.065 * g.size;
-    if (env.m > need + 0.18) {
-      if (rng.chance(0.6)) g.size += Math.abs(rng.gauss()) * 0.6;
-    } else if (env.m < need + 0.04) {
-      if (rng.chance(0.6)) g.size -= Math.abs(rng.gauss()) * 0.6;
-    } else if (rng.chance(0.3)) g.size += rng.gauss() * 0.4;
-  } else if (rng.chance(0.4)) g.size += rng.gauss() * 0.5 + 0.15;
-
-  const open = TRAIT_KEYS.filter((k) => traitCap(g, k) > 0);
+  g.tempOpt += rng.gauss() * 3;
+  g.phOpt += rng.gauss() * 0.3;
+  g.moistOpt += rng.gauss() * 0.08;
+  if (rng.chance(0.25)) g.tempTol *= Math.exp(rng.gauss() * 0.12);
+  if (rng.chance(0.2)) g.phTol *= Math.exp(rng.gauss() * 0.12);
+  if (rng.chance(0.2)) g.moistTol *= Math.exp(rng.gauss() * 0.12);
+  if (rng.chance(0.4)) g.size += rng.gauss() * 0.5;
+  const open = TRAIT_KEYS.filter(k => traitCap(g, k) > 0);
   const nTraits = 1 + rng.int(2);
-  for (let i = 0; i < nTraits && open.length; i++) {
-    const k = rng.pick(open);
-    g[k] += rng.gauss() * 0.18 + 0.03;
-  }
+  for (let i = 0; i < nTraits && open.length; i++) g[rng.pick(open)] += rng.gauss() * 0.18;
   sanitize(g);
   return { g, major };
 }

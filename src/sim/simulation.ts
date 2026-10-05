@@ -1,5 +1,6 @@
 import { CLS_WET, H, M_LUT, M_WATER, N, P_LUT, T_LUT, W, World } from './world';
 import { RNG } from './rng';
+import { CarbonCycle } from './earth';
 import { buildRegions, type Region } from './regions';
 import {
   SENTIENCE,
@@ -24,14 +25,12 @@ export const SOFT_CAP = 210; // above this, only major innovations found new spe
 export const HARD_CAP = 250; // above this, a newcomer may push out a faltering, redundant species
 /** Steps a new species is left alone before it can be made to give way to another. */
 export const GRACE = 200;
-/** Established land animal species it takes, once animals with backbones exist, for the seas to settle (no new sea animals or microbes). */
-export const SEA_SETTLES_AT = 12;
 export const KSCALE = 1000;
 export const MINP = 0.02;
 export const MAINT = 0.08;
 export const G_INTAKE = 0.5;
 export const TOTAL_TICKS = 6000;
-export const TOTAL_YEARS = 1_000_000;
+export const TOTAL_YEARS = 4_000_000_000;
 export const MAX_ENERGY = 100;
 export const ENERGY_REGEN = 0.28;
 export const HIST_EVERY = 8;
@@ -74,7 +73,7 @@ export interface GoalInfo {
 }
 
 export const GOALS: GoalInfo[] = [
-  { id: 'awakening', name: 'The Awakening', icon: '✨', blurb: 'Raise a species that becomes aware of its own existence before the million years run out.' },
+  { id: 'awakening', name: 'The Awakening', icon: '✨', blurb: 'Raise a species that becomes aware of its own existence within four billion years.' },
   { id: 'dominion', name: 'Dominion', icon: '👑', blurb: 'Let one animal species wipe out every other animal on the planet.' },
   { id: 'eden', name: 'Garden of Eden', icon: '🌺', blurb: 'Nurture a world teeming with life: 45 to 70 kinds of plants and animals side by side, depending on difficulty.' },
   { id: 'sandbox', name: 'Sandbox', icon: '🪐', blurb: 'No goal and unlimited divine power. Just play God.' },
@@ -98,6 +97,7 @@ export interface VisualEffect {
 }
 
 export interface Plague {
+  kind: 'acute' | 'genotoxic' | 'retroviral';
   id: number;
   speciesId: number;
   name: string;
@@ -146,12 +146,13 @@ export const ATM_RANGE: Record<AtmKey, { min: number; max: number; log?: boolean
   seaLevel: { min: -0.3, max: 0.3 },
 };
 
-/** Calendar year for a simulation tick: time races early on and slows as life grows complex. */
+/** Geological epochs sample short ecological episodes; a step is not an organism's generation. */
 export function yearAt(tick: number): number {
-  if (tick >= TOTAL_TICKS) return TOTAL_YEARS + ((tick - TOTAL_TICKS) * TOTAL_YEARS * 0.12) / TOTAL_TICKS;
-  const x = tick / TOTAL_TICKS;
-  return TOTAL_YEARS * (0.12 * x + 0.88 * (1 - Math.pow(1 - x, 3)));
+  return Math.max(0, tick) * TOTAL_YEARS / TOTAL_TICKS;
 }
+
+const DEME_W = 16, DEME_H = 15, DEMES = (W / DEME_W) * (H / DEME_H);
+const demeAt = (c: number) => Math.floor(c / W / DEME_H) * (W / DEME_W) + Math.floor(c % W / DEME_W);
 
 const PLAGUE_A = ['Red', 'Grey', 'Black', 'Pale', 'Weeping', 'Creeping', 'Silent', 'Burning', 'Withering', 'Shivering', 'Spotted', 'Hollow'];
 const PLAGUE_B = ['Rot', 'Fever', 'Wasting', 'Blight', 'Pox', 'Murrain', 'Sleep', 'Scourge', 'Canker', 'Ague'];
@@ -261,7 +262,14 @@ export class Sim {
   private nextPlague = 1;
   climateDirty = true;
   /** Once land life has taken over, the seas and the microbes stop bringing forth new species. */
-  seaSettled = false;
+  readonly carbon = new CarbonCycle();
+  private lastGeologyYear = 0;
+  private readonly movingPop = new Float32Array(N * MAXS);
+  private readonly localT = new Float32Array(MAXS * DEMES);
+  private readonly localPh = new Float32Array(MAXS * DEMES);
+  private readonly localM = new Float32Array(MAXS * DEMES);
+  // Frequency of a pre-existing resistance allele; selection can change this locally.
+  private readonly resistance = new Float32Array(MAXS * DEMES).fill(0.5);
 
   constructor(seed: number, goal: GoalId, difficulty: DifficultyId = 'normal') {
     this.diff = DIFFICULTIES.find((d) => d.id === difficulty) ?? DIFFICULTIES[1];
@@ -365,6 +373,11 @@ export class Sim {
     const sp = new Species(genome);
     sp.id = this.species.length;
     sp.slot = slot;
+    for (let d = 0; d < DEMES; d++) {
+      const i = d * MAXS + slot;
+      this.localT[i] = this.localPh[i] = this.localM[i] = 0;
+      this.resistance[i] = 0.5;
+    }
     sp.parentId = parent ? parent.id : -1;
     sp.bornTick = this.tick;
     sp.bornYear = this.year;
@@ -488,9 +501,11 @@ export class Sim {
   step(): void {
     if (this.status !== 'running' && !this.freePlay) return;
     this.tick++;
+    const previousYear = this.year;
     this.year = yearAt(this.tick);
+    if (this.tick % 8 === 0) this.moveContinents();
     for (const sp of this.alive) this.shelter[sp.slot] = sp.shelterUntil > this.tick ? 1 : 0;
-    this.updateAtmosphere();
+    this.updateAtmosphere(this.year - previousYear);
     if (this.climateDirty || this.tick % 4 === 0) {
       this.world.updateClimate();
       this.climateDirty = false;
@@ -512,26 +527,79 @@ export class Sim {
     }
   }
 
-  private updateAtmosphere(): void {
+  private moveContinents(): void {
+    const w = this.world;
+    const oldOwner = w.tectonics.owner.slice();
+    const oldLand = w.isWater.slice();
+    const shifts = w.advanceGeology(this.lastGeologyYear, this.year);
+    this.lastGeologyYear = this.year;
+    this.movingPop.fill(0);
+    const fields = [this.localT, this.localPh, this.localM, this.resistance];
+    const carried = fields.map(() => new Float64Array(MAXS * DEMES));
+    const massByDeme = new Float64Array(MAXS * DEMES);
+    const carry = (c: number, nc: number, slot: number, mass: number) => {
+      this.movingPop[nc * MAXS + slot] += mass;
+      const from = demeAt(c) * MAXS + slot, to = demeAt(nc) * MAXS + slot;
+      massByDeme[to] += mass;
+      for (let f = 0; f < fields.length; f++) carried[f][to] += fields[f][from] * mass;
+    };
+    // Carry land populations with their crust; floating/swimming populations stay in water coordinates.
+    for (let c = 0; c < N; c++) {
+      const p = oldOwner[c];
+      const shift = p >= 0 && !oldLand[c] ? shifts[p] : { dx: 0, dy: 0 };
+      const x = ((c % W + shift.dx) % W + W) % W;
+      const y = clamp(Math.floor(c / W) + shift.dy, 0, H - 1);
+      const x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0;
+      for (const sp of this.alive) {
+        const mass = this.pop[c * MAXS + sp.slot];
+        if (!mass) continue;
+        if (sp.genome.habitat === 'aquatic') { carry(c, c, sp.slot, mass); continue; }
+        for (let iy = 0; iy < 2; iy++) for (let ix = 0; ix < 2; ix++) {
+          const nc = Math.min(H - 1, y0 + iy) * W + (x0 + ix) % W;
+          carry(c, nc, sp.slot, mass * (ix ? fx : 1 - fx) * (iy ? fy : 1 - fy));
+        }
+      }
+    }
+    this.pop.set(this.movingPop);
+    for (let i = 0; i < massByDeme.length; i++) if (massByDeme[i] > 0) {
+      for (let f = 0; f < fields.length; f++) fields[f][i] = carried[f][i] / massByDeme[i];
+    }
+    this.refreshRegions();
+    this.climateDirty = true;
+  }
+
+  private refreshRegions(): void {
+    const next = buildRegions(this.world, this.seed);
+    this.regions.splice(0, this.regions.length, ...next.regions);
+    this.regionOf.set(next.regionOf);
+  }
+
+  private updateAtmosphere(years: number): void {
     const a = this.world.atm;
-    const oceanR = Math.min(1.5, this.oceanPhoto / this.oceanRef);
-    const landR = Math.min(1.5, this.landPhoto / this.landRef);
-    // photosynthesis fills the air with oxygen; land plants bury far more carbon than plankton
-    let o2eq = 22 * (0.4 * oceanR + 0.7 * landR);
-    if (o2eq > 17.6) o2eq = 17.6 + (o2eq - 17.6) * 0.35;
-    a.o2 += (o2eq - a.o2) * 0.008;
-    const co2eq = (280 * 4.3) / (1 + 3.3 * (0.4 * oceanR + 0.6 * landR));
-    a.co2 += (co2eq - a.co2) * 0.005;
+    const before = { ...a };
+    const production = Math.min(1.5, this.oceanPhoto / this.oceanRef) * 0.4 + Math.min(1.5, this.landPhoto / this.landRef) * 0.7;
+    this.carbon.step(a, years, production, this.heteroBio / Math.max(1, this.oceanRef), this.world.meanTemp - 15);
     const ch4eq = (1 + 40 * Math.min(1, this.chemoBio / this.chemoRef)) / (1 + a.o2 * 1.5);
-    a.ch4 += (ch4eq - a.ch4) * 0.02;
+    a.ch4 += (ch4eq - a.ch4) * (1 - Math.exp(-years / 20e6));
+    // Aerosols and outbreaks are sampled ecological episodes, not literal million-year events.
     a.so2 *= 0.96;
     a.dust *= 0.95;
-    a.o2 = clamp(a.o2, 0, 35);
     a.co2 = clamp(a.co2, 50, 8000);
     a.ch4 = clamp(a.ch4, 0, 200);
-    this.eq.o2 = o2eq;
-    this.eq.co2 = co2eq;
+    this.eq.o2 = clamp(a.o2 + (a.o2 - before.o2) * 30, 0, 35);
+    this.eq.co2 = clamp(a.co2 + (a.co2 - before.co2) * 30, 50, 8000);
     this.eq.ch4 = ch4eq;
+  }
+
+  /** Relative damage after generic cellular repair. Exposure also creates undirected variation. */
+  exposureFitness(c: number): number {
+    return Math.exp(-0.012 * this.world.radiation[c] - 0.045 * this.world.uv[c]);
+  }
+
+  localGenome(sp: Species, c: number): Genome {
+    const i = demeAt(c) * MAXS + sp.slot;
+    return { ...sp.genome, tempOpt: sp.genome.tempOpt + this.localT[i], phOpt: sp.genome.phOpt + this.localPh[i],
+      moistOpt: sp.genome.moistOpt + this.localM[i], immunity: clamp(sp.genome.immunity + (this.resistance[i] - 0.5) * 0.2, 0, 1) };
   }
 
   /** Growth, competition, grazing, predation and local spread, cell by cell. */
@@ -573,10 +641,16 @@ export class Sim {
       const cnp = canopy[c];
       const Kp = KSCALE * photoProd[c];
       const Kc = KSCALE * chemoProd[c];
+      const exposure = this.exposureFitness(c);
+      const demeBase = demeAt(c) * MAXS;
 
       for (let a = 0; a < n; a++) {
         const s = ps[a];
-        fit[a] = tLut[s * T_LUT + tI] * pLut[s * P_LUT + pI] * mLut[s * M_LUT + mI] * hab[s * 4 + cl] * (fitOpen[s] + (fitForest[s] - fitOpen[s]) * cnp) * o2f[s];
+        const i = demeBase + s;
+        const t = clamp(Math.round(tI - this.localT[i] * 2), 0, T_LUT - 1);
+        const p = clamp(Math.round(pI - this.localPh[i] * 10), 0, P_LUT - 1);
+        const m = mI === M_WATER ? M_WATER : clamp(Math.round(mI - this.localM[i] * 100), 0, 100);
+        fit[a] = tLut[s * T_LUT + t] * pLut[s * P_LUT + p] * mLut[s * M_LUT + m] * hab[s * 4 + cl] * (fitOpen[s] + (fitForest[s] - fitOpen[s]) * cnp) * o2f[s] * exposure;
         loss[a] = 0;
       }
 
@@ -823,87 +897,48 @@ export class Sim {
   // Speciation
   // -------------------------------------------------------------------------
 
-  /**
-   * Gradual evolution within a species: its preferences drift towards the conditions
-   * where most of its population actually lives, so lineages can track a changing climate.
-   */
+  /** Local variants arise blindly; differential survival, drift and gene flow change their frequency. */
   private adaptInPlace(sp: Species): void {
-    const w = this.world;
-    const s = sp.slot;
-    let sum = 0;
-    let st = 0;
-    let sph = 0;
-    let sm = 0;
-    let land = 0;
-    for (let c = 0; c < N; c++) {
-      const p = this.pop[c * MAXS + s];
-      if (p <= 0) continue;
-      sum += p;
-      st += p * w.temp[c];
-      sph += p * w.ph[c];
-      if (!w.isWater[c]) {
-        sm += p * w.moist[c];
-        land += p;
+    const c = this.randomOccupiedCell(sp);
+    if (c < 0) return;
+    const i = demeAt(c) * MAXS + sp.slot;
+    const resident = this.localGenome(sp, c);
+    const variant = { ...resident };
+    const trait = this.rng.pick(['tempOpt', 'phOpt', 'moistOpt'] as const);
+    variant[trait] += this.rng.gauss() * (trait === 'tempOpt' ? 1.5 : trait === 'phOpt' ? 0.12 : 0.04);
+    sanitize(variant);
+    const oldFit = this.staticFitness(resident, c), newFit = this.staticFitness(variant, c);
+    // Nearly neutral variants sometimes persist through drift; harmful changes usually disappear.
+    if (newFit > oldFit || (Math.abs(newFit - oldFit) < 0.005 && this.rng.chance(0.1))) {
+      this.localT[i] = clamp(variant.tempOpt - sp.genome.tempOpt, -12, 12);
+      this.localPh[i] = clamp(variant.phOpt - sp.genome.phOpt, -1, 1);
+      this.localM[i] = clamp(variant.moistOpt - sp.genome.moistOpt, -0.25, 0.25);
+    }
+    // Gene flow only across occupied neighbouring patches, never an instant global sweep.
+    for (let tries = 0; tries < 12; tries++) {
+      const from = this.randomOccupiedCell(sp);
+      if (from < 0) break;
+      const to = this.world.nb[from * 4 + this.rng.int(4)];
+      if (to < 0 || this.pop[to * MAXS + sp.slot] <= MINP) continue;
+      const a = demeAt(from) * MAXS + sp.slot, b = demeAt(to) * MAXS + sp.slot;
+      if (a === b) continue;
+      for (const field of [this.localT, this.localPh, this.localM, this.resistance]) {
+        const flow = (field[a] - field[b]) * 0.03;
+        field[a] -= flow; field[b] += flow;
       }
     }
-    if (sum <= 0) return;
-    const g = sp.genome;
-
-    // the frontier: places of the right kind just beyond where it lives. Those living at the edge
-    // breed with the rest, so the whole species is slowly pulled towards the climate it is reaching.
-    let ft = 0;
-    let fm = 0;
-    let fn = 0;
-    let fland = 0;
-    for (let i = 0; i < 40; i++) {
-      const c = this.randomOccupiedCell(sp);
-      if (c < 0) break;
-      const nc = w.nb[c * 4 + this.rng.int(4)];
-      if (nc < 0 || this.pop[nc * MAXS + s] > MINP * 5 || this.hab[s * 4 + w.cls[nc]] <= 0.02) continue;
-      ft += w.temp[nc];
-      fn++;
-      if (!w.isWater[nc]) {
-        fm += w.moist[nc];
-        fland++;
-      }
-    }
-    const coreT = st / sum;
-    const coreM = land > 0 ? sm / land : g.moistOpt;
-    const edge = fn >= 4 ? 0.35 : 0;
-    const targetT = coreT * (1 - edge) + (fn ? ft / fn : coreT) * edge;
-    const targetM = coreM * (1 - edge) + (fland ? fm / fland : coreM) * edge;
-    const k = 0.25;
-    const dT = (targetT - g.tempOpt) * k;
-    const dPh = (sph / sum - g.phOpt) * k;
-    const dM = land > 0 ? (targetM - g.moistOpt) * k : 0;
-    // a frontier in a different climate slowly breeds a hardier, more tolerant species
-    const gap = fn ? Math.abs(ft / fn - g.tempOpt) : 0;
-    const widen = gap > g.tempTol * 0.6 && g.tempTol < 15 ? 0.25 : 0;
-    if (Math.abs(dT) < 0.15 && Math.abs(dPh) < 0.03 && Math.abs(dM) < 0.01 && !widen) return;
-    g.tempOpt += dT;
-    g.phOpt += dPh;
-    g.moistOpt += dM;
-    g.tempTol += widen;
-    this.refreshSpecies(sp);
   }
 
   private speciate(): void {
-    if (!this.seaSettled) {
-      let land = 0;
-      for (const sp of this.alive) if (sp.kind === 'animal' && sp.established && sp.genome.habitat !== 'aquatic' && sp.genome.tier >= 3) land++;
-      if (land >= SEA_SETTLES_AT && this.milestones.has('advanced')) {
-        this.seaSettled = true;
-        this.log('🌊', 'Life has conquered the land. The seas settle: their animals and the microbes live on, but bring forth no new species.', { major: true });
-      }
-    }
     const crowd = Math.max(0, 1 - this.nAlive / SOFT_CAP);
     const lonely = 1 + 6 / (this.nAlive + 1);
     for (const sp of this.alive.slice()) {
       if (sp.cells < 3) continue;
-      if (this.seaSettled && (sp.kind === 'microbe' || (sp.kind === 'animal' && sp.genome.habitat === 'aquatic'))) continue;
-      let p = 0.02 * (0.4 + Math.min(1.6, sp.cells / 400)) * lonely;
+      let p = 0.025 * (0.4 + Math.min(1.6, sp.cells / 400)) * lonely;
       if (sp.genome.tier <= 1 || sp.kind === 'animal') p *= 1.5;
       if (sp.mutagen > 0) p *= 5;
+      const c = this.randomOccupiedCell(sp);
+      if (c >= 0) p *= 1 + 0.15 * this.world.radiation[c] + 0.2 * this.world.uv[c];
       if (this.rng.chance(p)) this.trySpeciate(sp, { crowd });
     }
   }
@@ -928,7 +963,7 @@ export class Sim {
     if (hf <= 0) return 0;
     const m = w.isWater[c] ? 1 : moistResponse(g, w.moist[c]);
     const body = (d.fitOpen + (d.fitForest - d.fitOpen) * w.canopy[c]) * tierBonusOf(g);
-    return tempResponse(g, w.temp[c]) * phResponse(g, w.ph[c]) * m * hf * body * o2Factor(g, w.atm.o2, w.atm.co2);
+    return tempResponse(g, w.temp[c]) * phResponse(g, w.ph[c]) * m * hf * body * o2Factor(g, w.atm.o2, w.atm.co2) * this.exposureFitness(c);
   }
 
   /**
@@ -1016,30 +1051,17 @@ export class Sim {
       sanitize(child);
       major = null;
     } else {
-      const res = mutate(parent.genome, this.rng, env);
+      const res = mutate(this.localGenome(parent, seed), this.rng, env);
       if (!res) return null;
       child = res.g;
       major = res.major;
       if (habFactors(child)[w.cls[target]] <= 0.02) return null;
-      if (this.seaSettled && child.habitat === 'aquatic' && !isAuto(child)) return null;
       // natural selection: the mutant must be able to grow from rarity in the living community
       const com = this.community(target);
       const gChild = this.invasionRate(child, target, com, parent);
       if (gChild <= (major ? 0.02 : 0.004)) return null;
       if (!major) {
         const edge = gChild - this.invasionRate(parent.genome, target, com, parent);
-        let edgeHome = edge;
-        if (seed !== target) {
-          const comS = this.community(seed);
-          edgeHome = this.invasionRate(child, seed, comS, parent) - this.invasionRate(parent.genome, seed, comS, parent);
-        }
-        if (edgeHome > 0.004 && edge > -0.004) {
-          // better at home and abroad: the improvement sweeps through the whole species, no new branch
-          parent.genome = child;
-          this.refreshSpecies(parent);
-          if (parent.established) this.checkTraits(parent);
-          return null;
-        }
         if (edge <= 0.01) return null;
         if (!this.rng.chance(opts.crowd ?? 1)) return null;
       }
@@ -1127,9 +1149,10 @@ export class Sim {
       const P = this.pop[c * MAXS + s];
       W += P;
       const cnp = w.canopy[c];
-      const tF = this.tLut[s * T_LUT + w.ti[c]];
-      const pF = this.pLut[s * P_LUT + w.pi[c]];
-      const mF = this.mLut[s * M_LUT + w.mi[c]];
+      const local = this.localGenome(sp, c);
+      const tF = tempResponse(local, w.temp[c]);
+      const pF = phResponse(local, w.ph[c]);
+      const mF = w.isWater[c] ? 1 : moistResponse(local, w.moist[c]);
       const oF = this.o2f[s];
       const fit = tF * pF * mF * this.hab[s * 4 + w.cls[c]] * (this.fitOpen[s] + (this.fitForest[s] - this.fitOpen[s]) * cnp) * oF;
       d.fit += P * fit;
@@ -1218,7 +1241,7 @@ export class Sim {
       [(base ? base.tF : 1) - now.tF, now.temp > g.tempOpt ? `the climate grew too hot for it (around ${Math.round(now.temp)} °C where it lived, against the ${Math.round(g.tempOpt)} °C it was built for)` : `the climate grew too cold for it (around ${Math.round(now.temp)} °C where it lived, against the ${Math.round(g.tempOpt)} °C it was built for)`],
       [(base ? base.pF : 1) - now.pF, now.ph < g.phOpt ? `its ${g.habitat === 'aquatic' ? 'waters' : 'soils'} turned too acidic (pH ${now.ph.toFixed(1)})` : `its ${g.habitat === 'aquatic' ? 'waters' : 'soils'} turned too alkaline (pH ${now.ph.toFixed(1)})`],
       [(base ? base.mF : 1) - now.mF, now.moist < g.moistOpt ? 'the land dried out under it' : 'the land grew too wet for it'],
-      [(base ? base.oF : 1) - now.oF, g.diet === 'chemo' && g.tier === 0 ? 'the oxygen that filled the air poisoned it, as it does all the ancient vent microbes' : 'there was too little oxygen in the air for a body like this'],
+      [(base ? base.oF : 1) - now.oF, g.diet === 'chemo' && g.tier === 0 ? 'rising oxygen stressed this oxygen-sensitive lineage' : 'there was too little oxygen in the air for a body like this'],
     ];
     drops.sort((a, b) => b[0] - a[0]);
     const envScore = (base ? Math.max(0, base.fit - now.fit) : Math.max(0, 0.5 - now.fit)) * now.rate;
@@ -1371,7 +1394,7 @@ export class Sim {
       const p1 = phResponse(g, w.ph[c]);
       const m1 = w.isWater[c] ? 1 : moistResponse(g, w.moist[c]);
       const o1 = o2Factor(g, w.atm.o2, w.atm.co2);
-      const fit = t1 * p1 * m1 * hf[w.cls[c]] * (d.fitOpen + (d.fitForest - d.fitOpen) * cnp) * tierBonusOf(g) * o1;
+      const fit = t1 * p1 * m1 * hf[w.cls[c]] * (d.fitOpen + (d.fitForest - d.fitOpen) * cnp) * tierBonusOf(g) * o1 * this.exposureFitness(c);
       let C = 0;
       let Fp = 0;
       let Fc = 0;
@@ -1664,8 +1687,8 @@ export class Sim {
       }
     }
     if (this.tick === TOTAL_TICKS) {
-      if (this.sandbox) this.log('⌛', 'A million years have passed. Time rolls on.', { major: true });
-      else this.end('lost', 'Time Has Run Out', 'A million years have passed and your design remains unfinished. The world goes on without a purpose.');
+      if (this.sandbox) this.log('⌛', 'Four billion years have passed. Time rolls on.', { major: true });
+      else this.end('lost', 'Time Has Run Out', 'Four billion years have passed and your design remains unfinished. The world goes on without a purpose.');
     }
   }
 
@@ -1824,7 +1847,7 @@ export class Sim {
     else if (!w.isWater[cell]) this.log('🌋', `A volcano erupts ${where}, spreading ash and fertile minerals.`, { cell });
   }
 
-  startPlague(sp: Species, cell: number, natural: boolean): Plague | null {
+  startPlague(sp: Species, cell: number, natural: boolean, kind: Plague['kind'] = this.rng.pick(['acute', 'acute', 'genotoxic', 'retroviral'])): Plague | null {
     if (!sp.alive) return null;
     if (this.plagues.some((p) => p.speciesId === sp.id)) return null;
     const state = new Uint8Array(N);
@@ -1837,14 +1860,15 @@ export class Sim {
     });
     if (!active.length) return null;
     const pl: Plague = {
+      kind,
       id: this.nextPlague++,
       speciesId: sp.id,
       name: `the ${this.rng.pick(PLAGUE_A)} ${this.rng.pick(PLAGUE_B)}`,
       state,
       active,
-      mortality: 0.42,
+      mortality: kind === 'acute' ? 0.42 : kind === 'genotoxic' ? 0.26 : 0.16,
       spread: clamp(0.45 + 0.3 * sp.genome.social + (sp.genome.tier <= 1 ? 0.15 : 0), 0, 0.9),
-      duration: 4,
+      duration: kind === 'retroviral' ? 7 : 4,
       startPop: sp.totalPop,
       killed: 0,
       natural,
@@ -1852,6 +1876,7 @@ export class Sim {
     this.plagues.push(pl);
     this.addEffect('plague', cell, 2);
     this.log('🦠', natural ? `A sickness, ${pl.name}, breaks out among ${sp.name}.` : `You breathe ${pl.name} upon ${sp.name}.`, { speciesId: sp.id, cell });
+    this.log('🔬', kind === 'retroviral' ? 'This retrovirus can occasionally leave inherited insertions; most create no successful lineage.' : kind === 'genotoxic' ? 'This infection damages host cells. Somatic damage is not passed to offspring.' : 'This acute infection favours existing resistance among exposed populations.', { speciesId: sp.id, cell });
     return pl;
   }
 
@@ -1862,10 +1887,19 @@ export class Sim {
       if (sp.alive && sp.shelterUntil > this.tick) continue;
       if (!sp.alive) continue;
       const slot = sp.slot;
-      const mort = pl.mortality * (1 - 0.85 * sp.genome.immunity);
+      const regional = new Float64Array(DEMES);
+      const killedLow = new Float64Array(DEMES), killedHigh = new Float64Array(DEMES);
+      for (let c = 0; c < N; c++) regional[demeAt(c)] += this.pop[c * MAXS + slot];
       const next: number[] = [];
       for (const c of pl.active) {
         const before = this.pop[c * MAXS + slot];
+        const d = demeAt(c), i = d * MAXS + slot, f = this.resistance[i];
+        const somatic = pl.kind === 'genotoxic' ? 0.035 : 0;
+        const low = clamp(pl.mortality * (1 - 0.85 * clamp(sp.genome.immunity - 0.1, 0, 1)) + somatic, 0, 1);
+        const high = clamp(pl.mortality * (1 - 0.85 * clamp(sp.genome.immunity + 0.1, 0, 1)) + somatic, 0, 1);
+        const mort = low * (1 - f) + high * f;
+        killedLow[d] += before * (1 - f) * low;
+        killedHigh[d] += before * f * high;
         pl.killed += before * mort;
         sp.losses.plague += before * mort;
         this.pop[c * MAXS + slot] = before * (1 - mort);
@@ -1881,6 +1915,17 @@ export class Sim {
             }
           }
         }
+      }
+      for (let d = 0; d < DEMES; d++) {
+        const i = d * MAXS + slot, f = this.resistance[i];
+        const survivors = regional[d] - killedLow[d] - killedHigh[d];
+        if (survivors > MINP) this.resistance[i] = clamp((regional[d] * f - killedHigh[d]) / survivors, 0, 1);
+      }
+      if (pl.kind === 'retroviral' && pl.active.length && this.rng.chance(0.01)) {
+        // Inherited insertion is a rare additional random variant, subject to normal establishment.
+        const c = this.rng.pick(pl.active);
+        const child = this.trySpeciate(sp, { atCell: c, crowd: Math.max(0, 1 - this.nAlive / SOFT_CAP) });
+        if (child) this.log('🧬', `An inherited viral insertion contributed to a new branch of ${sp.name}.`, { speciesId: child.id, cell: c });
       }
       // now and then a carrier travels far
       if (next.length && this.rng.chance(0.35)) {
@@ -1901,9 +1946,7 @@ export class Sim {
       if (!next.length) {
         this.plagues.splice(this.plagues.indexOf(pl), 1);
         const dead = pl.startPop > 0 ? clamp(pl.killed / pl.startPop, 0, 0.99) : 0;
-        sp.genome.immunity = Math.min(1, sp.genome.immunity + 0.2);
-        this.refreshSpecies(sp);
-        if (!pl.natural || dead > 0.2) this.log('🩹', `${cap(pl.name)} burns itself out. It killed about ${Math.round(dead * 100)}% of ${sp.name}; the survivors are hardier.`, { speciesId: sp.id });
+        if (!pl.natural || dead > 0.2) this.log('🩹', `${cap(pl.name)} burns itself out. Recorded losses equal about ${Math.round(dead * 100)}% of the starting population. Selection affected exposed populations; distant populations received no immunity.`, { speciesId: sp.id });
       }
     }
   }
@@ -1917,7 +1960,12 @@ export class Sim {
         if (!w.isWater[c] && this.fuelAt(c) > 0.4 && w.moist[c] < 0.55 && this.ignite(c)) break;
       }
     }
-    if (this.rng.chance(0.002 * dis)) this.volcano(this.rng.int(N), true);
+    if (this.rng.chance(0.002 * dis)) {
+      for (let tries = 0; tries < 30; tries++) {
+        const c = this.rng.int(N);
+        if (this.rng.chance(w.tectonics.activity[c])) { this.volcano(c, true); break; }
+      }
+    }
     if (this.rng.chance(0.0003 * dis)) this.meteor(this.rng.int(N), true);
     if (this.rng.chance(0.004 * dis) && this.alive.length) {
       const sp = this.rng.pick(this.alive);
@@ -1984,7 +2032,7 @@ export class Sim {
     }
     if (!this.sandbox) this.energy = Math.max(0, this.energy - cost);
     a[key] = value;
-    if (key === 'seaLevel') this.world.updateGeography();
+    if (key === 'seaLevel') { this.world.updateGeography(); this.refreshRegions(); }
     this.climateDirty = true;
     const text: Record<AtmKey, string> = {
       co2: `You set the carbon dioxide to ${Math.round(value)} ppm.`,
@@ -2029,10 +2077,12 @@ function cap(s: string): string {
 }
 
 export function fmtYear(year: number): string {
-  return `year ${Math.round(year).toLocaleString('en-US')}`;
+  return year >= 1e9 ? `${(year / 1e9).toFixed(2)} billion years` : year >= 1e6 ? `${(year / 1e6).toFixed(1)} million years` : `year ${Math.round(year).toLocaleString('en-US')}`;
 }
 
 export function fmtYears(years: number): string {
+  if (years >= 1e9) return `${(years / 1e9).toFixed(2)} billion years`;
+  if (years >= 1e6) return `${(years / 1e6).toFixed(1)} million years`;
   if (years >= 10000) return `${Math.round(years / 1000).toLocaleString('en-US')},000 years`;
   return `${(Math.round(years / 100) * 100).toLocaleString('en-US')} years`;
 }

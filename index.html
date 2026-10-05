@@ -10,7 +10,7 @@
     <div id="app">
       <header id="topbar">
         <div class="brand">
-          <span class="globe">🌍</span>
+          <span class="globe atlas-orb" aria-hidden="true"></span>
           <div>
             <h1>Evolution</h1>
             <small>a god game</small>
@@ -18,7 +18,7 @@
         </div>
         <div class="clock">
           <div class="clock-row"><span id="year">Year 0</span><span id="age">Age of Microbes</span></div>
-          <div class="timebar" title="A million years: time races at first and slows as life grows complex"><div id="timefill"></div></div>
+          <div class="timebar" title="Four billion years, with short ecological episodes sampled within geological epochs"><div id="timefill"></div></div>
         </div>
         <div class="speed" id="speed"></div>
         <div class="energy" id="energy" title="Divine energy: spent on every intervention, regained with time"></div>
@@ -49,10 +49,11 @@
       </aside>
 
       <main id="center">
+        <div class="atlas-heading"><span>THE LIVING ATLAS</span><span>Scroll to explore · Drag to travel</span></div>
+        <div id="layers" aria-label="Map layers"></div>
         <div id="mapwrap">
           <canvas id="map"></canvas>
           <canvas id="overlay"></canvas>
-          <div id="layers"></div>
           <div id="zoomctl">
             <button data-zoom="in" title="Zoom in (+ or mouse wheel)">＋</button>
             <button data-zoom="out" title="Zoom out (−)">－</button>

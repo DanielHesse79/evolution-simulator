@@ -15,11 +15,28 @@ test('deep-time clock is continuous through the game end; unresolved orbital cyc
   near(meanCycle(0, 41000 / 2, 41000), 2 / Math.PI);
 });
 
-test('mutation proposals do not depend on local need, food, oxygen or an open niche', () => {
-  const parent = new Sim(12345, 'sandbox').alive[0].genome;
-  const cold: MutEnv = { t: -20, ph: 4, m: 0.05, cls: 0, o2: 0, parentHab: 0, hasAutoFood: false, hasPrey: false, hasHerb: false, hasCarn: false, tierOpen: false };
-  const warm: MutEnv = { t: 40, ph: 9, m: 0.9, cls: 3, o2: 30, parentHab: 1, hasAutoFood: true, hasPrey: true, hasHerb: true, hasCarn: true, tierOpen: true };
-  for (let seed = 1; seed <= 300; seed++) assert.deepEqual(mutate(parent, new RNG(seed), cold), mutate(parent, new RNG(seed), warm));
+// Mutation proposals deliberately lean towards the place where the daughter is born: each one stands
+// for many generations of selection that the game does not simulate. The invasion test still decides.
+test('mutation proposals lean towards the local climate, but stay variable', () => {
+  const parent = { ...new Sim(12345, 'sandbox').alive[0].genome, tempOpt: 20 };
+  const base: MutEnv = { t: 20, ph: 7, m: 0.5, cls: 0, o2: 0, parentHab: 1, hasAutoFood: false, hasPrey: false, hasHerb: false, hasCarn: false, tierOpen: false };
+  const mean = (t: number) => {
+    let sum = 0;
+    let n = 0;
+    for (let seed = 1; seed <= 300; seed++) {
+      const r = mutate(parent, new RNG(seed), { ...base, t });
+      if (r) {
+        sum += r.g.tempOpt;
+        n++;
+      }
+    }
+    return sum / n;
+  };
+  assert.ok(mean(-10) < 15, 'cold birthplaces pull proposals colder');
+  assert.ok(mean(40) > 25, 'warm birthplaces pull proposals warmer');
+  const spread = new Set<number>();
+  for (let seed = 1; seed <= 50; seed++) spread.add(Math.round(mutate(parent, new RNG(seed), { ...base, t: 30 })!.g.tempOpt));
+  assert.ok(spread.size > 5, 'proposals are not all identical');
 });
 
 test('plates preserve stationary terrain, move reproducibly at centimetres per year, and make boundaries', () => {

@@ -57,21 +57,29 @@ aquatic oxygen availability; dissolved oxygen and ocean anoxia are not explicitl
 
 ## Variation, selection and local populations
 
-Mutation proposals do not inspect temperature, moisture, pH, food availability or oxygen to choose
-useful changes. Environmental preference changes and trait increments are random; structural
-limits still constrain possible body plans. Selection tests whether variants can establish in the
-local food web. Most attempts disappear without creating a named species.
+Single mutations are blind, but the game samples only a few speciation events per lineage, not every
+generation. Each proposal therefore stands for many generations of selection that are not simulated:
+it leans towards the climate, food and body size of the place where the daughter is born (larger land
+plants where water allows, smaller where it is dry), with random variation on top. This is a deliberate
+game shortcut, not a claim that mutation is directed. Structural limits still constrain possible body
+plans, and selection still tests whether a variant can establish in the local food web. Most attempts
+disappear without creating a named species. A variant that does better both where it is born and in the
+founder's home spreads through the whole species instead of founding a new one, so traits can accumulate.
 
 Each species also has regional variation in thermal, pH and moisture preferences across 60 spatial
 patches. Random local variants can be selected or occasionally persist through near-neutral drift.
 Occupied neighbouring patches exchange some variation, and daughter lineages inherit their local
-founder's preferences. There is no automatic whole-species sweep towards the prevailing climate.
+founder's preferences. In addition, the whole species slowly drifts towards the climate it lives in and,
+a little, towards the climate at the edge of its range, widening its tolerance when that edge lies in a
+different climate. This again stands in for unsimulated generations and lets forests spread across climates.
 Regional resistance allele frequencies start with standing variation and respond to differential
 survival during infection. Gene flow is approximate patch mixing, not individual mating or a full
 population-genetic model; there are no explicit chromosomes, recombination or reproductive isolation.
 The portrait and genome panel show a lineage's reference body plan, not every regional variant.
 
-Microbes and marine animals can keep branching after land animals appear. Shared niche and total
+Once animals with backbones exist and twelve land animal species are established, the seas settle:
+marine animals and microbes live on but no longer branch into new species (marine plants, which make
+much of the oxygen, keep evolving). This keeps the game focused on the land; it is not a biological claim. Shared niche and total
 species limits remain for performance and gameplay; they are not biological laws. Complexity tiers,
 oxygen thresholds, taxonomic labels, the restriction of chemical-feeding organisms to small body
 plans, and guaranteed model advantages of some body plans are still deliberate simplifications.
@@ -83,7 +91,9 @@ cosmic component that increases with altitude and latitude. The rock component m
 crust. Water attenuates exposure; deep-water organisms receive greater shielding. This is a coarse
 habitat average, not a radiation-transport calculation or a dose in mSv/Gy.
 
-UV has its own layer and is attenuated by an oxygen-dependent ozone proxy and by water. UV and
+UV has its own layer. It follows sunlight strength by latitude, rises with altitude, and is attenuated
+by water and by an oxygen-dependent ozone proxy that saturates (an ozone layer reduces surface UV by about
+three quarters but never removes it). UV and
 ionizing radiation are not treated as the same physical source. Radiation introduces a small
 fitness burden representing residual damage after generic cellular repair, and increases the
 number of random mutation attempts. It does not direct mutations or guarantee useful traits.
@@ -121,12 +131,13 @@ These sources support the mechanisms, not the game's numerical coefficients.
 
 ## Validation
 
-`npm test` checks independent mutation proposals, time continuity, orbital averaging, plate units
+`npm test` checks that mutation proposals lean towards the local climate while staying variable, time continuity, orbital averaging, plate units
 and repeatability, carbon conservation, separate UV shielding, biomass conservation during crust
 movement, refreshed regions, and local rather than global resistance after infection.
 
 `npm run science:survey` runs three seeded worlds for all 6,000 epochs, checks finite non-negative
-populations and atmosphere, and verifies that marine branching continues in later epochs. This is
+populations and atmosphere, verifies that marine plants keep branching in later epochs, that settled seas
+bring forth no new animals or microbes, and that forests arise. This is
 a stability check, not a validation of biological realism or equal difficulty for every goal.
 
 Verification on 2026-10-05: all nine regression tests and the production build passed. The complete

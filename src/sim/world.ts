@@ -380,7 +380,11 @@ export class World {
       // Relative exposure indices, not human dose estimates. Water shields organisms at depth.
       const shielding = isWater[c] ? (cls[c] === CLS_DEEP ? 0.1 : 0.45) : 1;
       this.radiation[c] = (this.rockRadiation[c] + 0.35 * (1 + al + Math.max(0, elev[c] - sea) * 2)) * shielding;
-      this.uv[c] = light[c] * Math.exp(-a.o2 / 4) * (isWater[c] ? (cls[c] === CLS_DEEP ? 0.05 : 0.35) : 1);
+      // Sunlight strength by latitude, stronger at altitude; an ozone layer that builds up with oxygen
+      // and then saturates (it never removes UV entirely), and water that absorbs it with depth.
+      const ozone = 1 - Math.exp(-a.o2 / 3);
+      const sky = light[c] * (1 + 0.3 * Math.max(0, elev[c] - sea));
+      this.uv[c] = sky * (1 - 0.78 * ozone) * (isWater[c] ? (cls[c] === CLS_DEEP ? 0.05 : 0.35) : 1);
       sumT += t * weight;
       ti[c] = clamp(Math.round((t + 40) * 2), 0, T_LUT - 1);
       pi[c] = Math.round(p * 10);

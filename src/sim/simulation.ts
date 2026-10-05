@@ -25,6 +25,8 @@ export const SOFT_CAP = 210; // above this, only major innovations found new spe
 export const HARD_CAP = 250; // above this, a newcomer may push out a faltering, redundant species
 /** Steps a new species is left alone before it can be made to give way to another. */
 export const GRACE = 200;
+/** Established land animal species it takes, once animals with backbones exist, for the seas to settle (no new sea animals or microbes). */
+export const SEA_SETTLES_AT = 12;
 export const KSCALE = 1000;
 export const MINP = 0.02;
 export const MAINT = 0.08;
@@ -262,6 +264,7 @@ export class Sim {
   private nextPlague = 1;
   climateDirty = true;
   /** Once land life has taken over, the seas and the microbes stop bringing forth new species. */
+  seaSettled = false;
   readonly carbon = new CarbonCycle();
   private lastGeologyYear = 0;
   private readonly movingPop = new Float32Array(N * MAXS);
@@ -860,7 +863,10 @@ export class Sim {
           continue;
         }
       } else sp.lowTicks = 0;
-      if ((this.tick + sp.id * 7) % 30 === 0 && age > 20) this.adaptInPlace(sp);
+      if ((this.tick + sp.id * 7) % 30 === 0 && age > 20) {
+        this.adaptInPlace(sp);
+        this.driftWithRange(sp);
+      }
       if (!sp.established && age >= 15 && sp.cells >= 4) {
         sp.established = true;
         this.onEstablished(sp);
@@ -897,6 +903,73 @@ export class Sim {
   // Speciation
   // -------------------------------------------------------------------------
 
+  /**
+   * Gradual evolution of the whole species, alongside the local variants: its reference preferences
+   * drift towards the conditions where most of it lives and, a little, towards the climate at the edge
+   * of its range, widening its tolerance when that edge lies in a different climate. This stands in for
+   * the many generations of selection the game does not simulate, and lets forests spread across climates.
+   */
+  private driftWithRange(sp: Species): void {
+    const w = this.world;
+    const s = sp.slot;
+    let sum = 0;
+    let st = 0;
+    let sph = 0;
+    let sm = 0;
+    let land = 0;
+    for (let c = 0; c < N; c++) {
+      const p = this.pop[c * MAXS + s];
+      if (p <= 0) continue;
+      sum += p;
+      st += p * w.temp[c];
+      sph += p * w.ph[c];
+      if (!w.isWater[c]) {
+        sm += p * w.moist[c];
+        land += p;
+      }
+    }
+    if (sum <= 0) return;
+    const g = sp.genome;
+
+    // the frontier: places of the right kind just beyond where it lives. Those living at the edge
+    // breed with the rest, so the whole species is slowly pulled towards the climate it is reaching.
+    let ft = 0;
+    let fm = 0;
+    let fn = 0;
+    let fland = 0;
+    for (let i = 0; i < 40; i++) {
+      const c = this.randomOccupiedCell(sp);
+      if (c < 0) break;
+      const nc = w.nb[c * 4 + this.rng.int(4)];
+      if (nc < 0 || this.pop[nc * MAXS + s] > MINP * 5 || this.hab[s * 4 + w.cls[nc]] <= 0.02) continue;
+      ft += w.temp[nc];
+      fn++;
+      if (!w.isWater[nc]) {
+        fm += w.moist[nc];
+        fland++;
+      }
+    }
+    const coreT = st / sum;
+    const coreM = land > 0 ? sm / land : g.moistOpt;
+    const edge = fn >= 4 ? 0.35 : 0;
+    const targetT = coreT * (1 - edge) + (fn ? ft / fn : coreT) * edge;
+    const targetM = coreM * (1 - edge) + (fland ? fm / fland : coreM) * edge;
+    const k = 0.25;
+    const dT = (targetT - g.tempOpt) * k;
+    const dPh = (sph / sum - g.phOpt) * k;
+    const dM = land > 0 ? (targetM - g.moistOpt) * k : 0;
+    // a frontier in a different climate slowly breeds a hardier, more tolerant species
+    const gap = fn ? Math.abs(ft / fn - g.tempOpt) : 0;
+    const widen = gap > g.tempTol * 0.6 && g.tempTol < 15 ? 0.25 : 0;
+    if (Math.abs(dT) < 0.15 && Math.abs(dPh) < 0.03 && Math.abs(dM) < 0.01 && !widen) return;
+    g.tempOpt += dT;
+    g.phOpt += dPh;
+    g.moistOpt += dM;
+    g.tempTol += widen;
+    this.refreshSpecies(sp);
+  }
+
+
   /** Local variants arise blindly; differential survival, drift and gene flow change their frequency. */
   private adaptInPlace(sp: Species): void {
     const c = this.randomOccupiedCell(sp);
@@ -930,10 +1003,19 @@ export class Sim {
   }
 
   private speciate(): void {
+    if (!this.seaSettled) {
+      let land = 0;
+      for (const sp of this.alive) if (sp.kind === 'animal' && sp.established && sp.genome.habitat !== 'aquatic' && sp.genome.tier >= 3) land++;
+      if (land >= SEA_SETTLES_AT && this.milestones.has('advanced')) {
+        this.seaSettled = true;
+        this.log('🌊', 'Life has conquered the land. The seas settle: their animals and the microbes live on, but bring forth no new species.', { major: true });
+      }
+    }
     const crowd = Math.max(0, 1 - this.nAlive / SOFT_CAP);
     const lonely = 1 + 6 / (this.nAlive + 1);
     for (const sp of this.alive.slice()) {
       if (sp.cells < 3) continue;
+      if (this.seaSettled && (sp.kind === 'microbe' || (sp.kind === 'animal' && sp.genome.habitat === 'aquatic'))) continue;
       let p = 0.025 * (0.4 + Math.min(1.6, sp.cells / 400)) * lonely;
       if (sp.genome.tier <= 1 || sp.kind === 'animal') p *= 1.5;
       if (sp.mutagen > 0) p *= 5;
@@ -1056,12 +1138,27 @@ export class Sim {
       child = res.g;
       major = res.major;
       if (habFactors(child)[w.cls[target]] <= 0.02) return null;
+      if (this.seaSettled && child.habitat === 'aquatic' && !isAuto(child)) return null;
       // natural selection: the mutant must be able to grow from rarity in the living community
       const com = this.community(target);
       const gChild = this.invasionRate(child, target, com, parent);
       if (gChild <= (major ? 0.02 : 0.004)) return null;
       if (!major) {
         const edge = gChild - this.invasionRate(parent.genome, target, com, parent);
+        let edgeHome = edge;
+        if (seed !== target) {
+          const comS = this.community(seed);
+          edgeHome = this.invasionRate(child, seed, comS, parent) - this.invasionRate(parent.genome, seed, comS, parent);
+        }
+        if (edgeHome > 0.004 && edge > -0.004) {
+          // better at home and abroad: the improvement spreads through the whole species, no new branch.
+          // Its climate preferences were measured against the founder's local variant; keep the others' offsets.
+          const i = demeAt(seed) * MAXS + parent.slot;
+          parent.genome = { ...child, tempOpt: child.tempOpt - this.localT[i], phOpt: child.phOpt - this.localPh[i], moistOpt: child.moistOpt - this.localM[i] };
+          this.refreshSpecies(parent);
+          if (parent.established) this.checkTraits(parent);
+          return null;
+        }
         if (edge <= 0.01) return null;
         if (!this.rng.chance(opts.crowd ?? 1)) return null;
       }

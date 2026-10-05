@@ -517,7 +517,7 @@ export class MapRenderer {
     }
     for (let c = 0; c < N; c++) {
       if (layer === 'radiation') set(c, ramp(MINERAL_STOPS, w.radiation[c] / 3));
-      else if (layer === 'uv') set(c, ramp(MINERAL_STOPS, w.uv[c]));
+      else if (layer === 'uv') set(c, ramp(MINERAL_STOPS, Math.min(1, w.uv[c] / 0.45))); // under an ozone layer land sits around 0.1-0.35
       else if (layer === 'tectonics') set(c, ramp(MINERAL_STOPS, w.tectonics.activity[c]));
       else if (layer === 'temp') set(c, ramp(TEMP_STOPS, w.temp[c]));
       else if (layer === 'ph') set(c, ramp(PH_STOPS, w.ph[c]));

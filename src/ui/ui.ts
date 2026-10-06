@@ -53,7 +53,7 @@ const ATM_UI: { key: AtmKey; label: string; fmt: (v: number) => string; hint: st
 ];
 
 const SPEEDS = ['⏸', '▶', '▶▶', '▶▶▶'];
-const SPEED_TITLES = ['Pause (space)', 'Normal speed (1)', 'Fast (2)', 'Very fast (3)'];
+const SPEED_TITLES = ['Pause (space)', 'Slow (1)', 'Fast (2)', 'Very fast (3)'];
 
 export class UI {
   tab: Tab = 'all';
@@ -689,7 +689,7 @@ export class UI {
           <li><b>Field guide (📖)</b> has a picture of every species, living and extinct. <b>🔊</b> switches between sound with music, effects only, and silence.</li>
           <li><b>Chapters (🎬)</b> pauses the world for your narrated turning points. Replay unlocked scenes, preview the other recordings, or disable automatic breaks. Escape skips a scene. The player's speed, camera and pause setting are preserved.</li>
         </ul>
-        <p>Everything costs <b>divine energy</b>, which returns slowly. The clock tracks geological epochs; short ecological episodes are sampled within them. <b>Space</b> pauses, <b>1–3</b> set the speed, <b>Esc</b> puts your powers down.</p>
+        <p>Everything costs <b>divine energy</b>, which returns slowly. The clock tracks geological epochs; short ecological episodes are sampled within them. <b>Space</b> pauses, <b>1</b> selects slow playback, <b>2–3</b> speed it up, <b>Esc</b> puts your powers down.</p>
         <div class="btnrow"><button class="secondary" id="cells">🔬 Cells compared</button><button class="secondary" id="tour">🧭 Guided tour</button><button class="primary" id="ok">Back to the world</button></div>
       </div>`,
       true,

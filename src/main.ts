@@ -12,7 +12,8 @@ import { UI, type Game } from './ui/ui';
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
 /** Simulation steps per second at each speed setting. */
-const TPS = [0, 4, 12, 40];
+// The first running speed leaves time to inspect the world and its moving geography.
+const TPS = [0, 1, 12, 40];
 const DESTRUCTIVE: PowerId[] = ['fire', 'drought', 'acid', 'plague', 'volcano', 'meteor'];
 /** Powers that are put down again after a single use, so a slip of the hand cannot repeat them. */
 const ONE_SHOT: PowerId[] = ['plague', 'transplant', 'volcano', 'meteor', 'mutagen'];

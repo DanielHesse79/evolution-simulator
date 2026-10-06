@@ -11,6 +11,13 @@ The main clock spans **four billion years in 6,000 geological epochs** (about 66
 Plate displacement and carbon transfers use the elapsed years explicitly. The clock continues
 at the same rate after the game ends.
 
+Playback speed is separate from this geological clock. Slow playback runs one epoch per real
+second (previously four), so the nominal four-billion-year span takes 100 minutes, excluding
+pauses and chapter breaks. Faster playback still targets 12 and 40 epochs per second, subject
+to machine performance. This slows plate movement and all other processes together on screen;
+it does not change displacement per geological year or evolution per epoch. Geology is applied
+every eight epochs, so changes in coastlines remain discrete.
+
 Population growth, dispersal, fires and infections are representative ecological episodes sampled
 within these epochs. Their durations are measured in episode steps, not geological years. We do
 not simulate every generation. This matters: an animated outbreak or volcano persisting on the

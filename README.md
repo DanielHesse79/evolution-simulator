@@ -58,7 +58,7 @@ Then open http://localhost:5173. `npm run build` produces a static site in `dist
   has textbook cells to compare with.
 - **Narrated chapters**: five supplied recordings accompany the origin of life, landfall, flight, a mammal-like body plan and a questioning mind. Optional chapter breaks pause the simulation; replay or preview them from **Chapters**. See [playback, triggers and scientific limits](docs/chapters.md).
 - **Guided tour**: offered on the start screen the first time, and from the help screen at any time.
-- **Keys**: `Space` pause, `1`–`3` speed, `+`/`−`/`0` zoom, arrow keys pan, `Esc` put the current power down.
+- **Keys**: `Space` pause, `1` slow playback (the default), `2`–`3` faster playback, `+`/`−`/`0` zoom, arrow keys pan, `Esc` put the current power down.
 
 The geological clock spans four billion years. Short ecological episodes are sampled within each epoch; individual fires and infections do not last millions of years. See [the scientific model and its limits](docs/science.md).
 

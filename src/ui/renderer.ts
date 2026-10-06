@@ -1,7 +1,7 @@
 import { H, N, W } from '../sim/world';
 import { MAXS, VOLCANO_LIFE, type Sim } from '../sim/simulation';
 import type { Species } from '../sim/species';
-import { landscapeSpriteKey, paintLandscapeSprite } from './landscape';
+import { landscapeSpriteKey, paintLandscapeSprite, terrainLandscapeKey } from './landscape';
 
 export type Layer = 'terrain' | 'temp' | 'moist' | 'ph' | 'minerals' | 'flora' | 'fauna' | 'richness' | 'radiation' | 'uv' | 'tectonics';
 
@@ -950,6 +950,9 @@ export class MapRenderer {
         const base = c * MAXS;
         if (w.isWater[c]) {
           const frozen = w.temp[c] <= -1.5;
+          if (frozen && hash(c, 83) < .3 && wet(x + .5, y + .55)) {
+            trees.push([(x + .5 - x0) * k, (y + .55 - y0) * ky, k * .45, 'ice-floe']);
+          }
           if (!frozen) {
             // waves
             ctx.lineWidth = Math.max(1, k * 0.022);
@@ -1090,8 +1093,11 @@ export class MapRenderer {
             }
           }
         }
-        if (can < 0.3 && h > 0.55 && hash(c, 77) < 0.55 && !wet(x + 0.5, y + 0.6)) {
-          trees.push([(x + 0.5 - x0) * k, (y + 0.55 - y0) * ky, k * 0.7, w.temp[c] < 0 ? '🏔️' : '⛰️']);
+        const coastal = [0, 1, 2, 3].some(i => { const n = w.nb[c * 4 + i]; return n >= 0 && !!w.isWater[n]; });
+        const terrainKey = terrainLandscapeKey({ water: false, temp: w.temp[c], ice: w.ice[c], height: h, moist: w.moist[c], canopy: can, cover: cov, coastal });
+        if (terrainKey && hash(c, 77) < .4 && !wet(x + .5, y + .6)) {
+          const size = terrainKey.includes('mountain') || terrainKey === 'glacier' ? .7 : terrainKey === 'boulders' ? .36 : .55;
+          trees.push([(x + .5 - x0) * k, (y + .55 - y0) * ky, k * size, terrainKey]);
         }
       }
     }

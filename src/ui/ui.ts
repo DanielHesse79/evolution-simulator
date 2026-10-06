@@ -60,6 +60,14 @@ export class UI {
   tab: Tab = 'all';
   sortBy: 'numbers' | 'size' | 'newest' = 'numbers';
   private logCount = 0;
+  private logFilter: 'all' | 'major' | 'creations' = 'all';
+  private followLog = true;
+  private unreadLog = 0;
+  private speciesSearch = '';
+  private creationsOnly = false;
+  private traitsOpen = false;
+  private detailId = -1;
+  private panelHTML = new WeakMap<HTMLElement, string>();
   private dragging: AtmKey | null = null;
   private hoverPower: PowerId | null = null;
   private tree: { layout: TreeLayout; canvas: HTMLCanvasElement } | null = null;
@@ -127,7 +135,10 @@ export class UI {
       });
     }
 
-    $('layers').innerHTML = LAYERS.map((l) => `<button data-layer="${l.id}">${l.icon} ${l.name}</button>`).join('');
+    const mainLayers = ['terrain', 'flora', 'fauna'];
+    const layerButton = (l: (typeof LAYERS)[number]) => `<button data-layer="${l.id}">${l.icon} ${l.name}</button>`;
+    $('layers').innerHTML = LAYERS.filter(l => mainLayers.includes(l.id)).map(layerButton).join('')
+      + `<details class="analysis-menu"><summary id="analysis-label">☷ More layers</summary><div class="layer-menu">${LAYERS.filter(l => !mainLayers.includes(l.id)).map(layerButton).join('')}</div></details>`;
     $('layers').insertAdjacentHTML('beforeend', '<button data-regions title="Show the borders and names of the regions">🗺️ Regions</button>');
     $('layers').addEventListener('click', (e) => {
       if ((e.target as HTMLElement).closest('[data-regions]')) {
@@ -136,7 +147,10 @@ export class UI {
         return;
       }
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-layer]');
-      if (b) g.setLayer(b.dataset.layer as Layer);
+      if (b) {
+        g.setLayer(b.dataset.layer as Layer);
+        $('layers').querySelector('details')?.removeAttribute('open');
+      }
     });
 
     const tabs: [Tab, string][] = [
@@ -160,7 +174,7 @@ export class UI {
       this.refresh(performance.now(), true);
     });
 
-    $('splist').addEventListener('pointerdown', (e) => {
+    $('splist').addEventListener('click', (e) => {
       const row = (e.target as HTMLElement).closest<HTMLElement>('[data-id]');
       if (row) g.select(Number(row.dataset.id));
     });
@@ -169,8 +183,58 @@ export class UI {
       const row = (e.target as HTMLElement).closest<HTMLElement>('[data-sp]');
       if (row) g.select(Number(row.dataset.sp));
     });
+    $('log').addEventListener('scroll', () => {
+      this.followLog = $('log').scrollTop < 12;
+      if (this.followLog) this.unreadLog = 0;
+      this.updateLogControls();
+    });
+    $('chronicle-latest').addEventListener('click', () => {
+      this.followLog = true;
+      this.unreadLog = 0;
+      $('log').scrollTop = 0;
+      this.updateLogControls();
+    });
+    $('chronicle-filters').addEventListener('click', e => {
+      const b = (e.target as HTMLElement).closest<HTMLElement>('[data-log-filter]');
+      if (!b) return;
+      this.logFilter = b.dataset.logFilter as typeof this.logFilter;
+      this.logCount = -1;
+      this.followLog = true;
+      this.unreadLog = 0;
+      this.renderLog();
+    });
+    $('chronicle-expand').addEventListener('click', () => {
+      const expanded = $('chronicle').classList.toggle('expanded');
+      $('chronicle').classList.remove('collapsed');
+      $('chronicle-expand').textContent = expanded ? 'Compact' : 'Expand';
+      $('chronicle-expand').setAttribute('aria-expanded', String(expanded));
+      $('chronicle-collapse').textContent = 'Hide';
+      $('chronicle-collapse').setAttribute('aria-expanded', 'true');
+    });
+    $('chronicle-collapse').addEventListener('click', () => {
+      const collapsed = $('chronicle').classList.toggle('collapsed');
+      $('chronicle-collapse').textContent = collapsed ? 'Show' : 'Hide';
+      $('chronicle-collapse').setAttribute('aria-expanded', String(!collapsed));
+    });
+    $('species-search').addEventListener('input', () => {
+      this.speciesSearch = $<HTMLInputElement>('species-search').value.trim().toLowerCase();
+      this.renderList();
+    });
+    $('creations-filter').addEventListener('click', () => {
+      this.creationsOnly = !this.creationsOnly;
+      $('creations-filter').setAttribute('aria-pressed', String(this.creationsOnly));
+      this.renderList();
+    });
+    document.addEventListener('click', e => {
+      for (const menu of document.querySelectorAll<HTMLDetailsElement>('.library-menu, .analysis-menu')) {
+        if (!menu.contains(e.target as Node) || (e.target as HTMLElement).closest('button')) menu.open = false;
+      }
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') document.querySelectorAll<HTMLDetailsElement>('.library-menu, .analysis-menu').forEach(menu => menu.open = false);
+    });
 
-    $('detail').addEventListener('pointerdown', (e) => this.onDetailClick(e));
+    $('detail').addEventListener('click', (e) => this.onDetailClick(e));
 
     $('btn-tree').addEventListener('click', () => this.showTree());
     $('btn-guide').addEventListener('click', () => this.showGuide());
@@ -190,10 +254,19 @@ export class UI {
   /** Reset per-world UI state when a new world begins. */
   reset(): void {
     $<HTMLButtonElement>('btn-chapters').disabled = false;
-    this.logCount = 0;
+    this.logCount = -1;
+    this.logFilter = 'all';
     $('log').innerHTML = '';
     this.dragging = null;
     this.tree = null;
+    this.detailId = -1;
+    this.followLog = true;
+    this.unreadLog = 0;
+    this.speciesSearch = '';
+    this.creationsOnly = false;
+    this.traitsOpen = false;
+    $<HTMLInputElement>('species-search').value = '';
+    $('creations-filter').setAttribute('aria-pressed', 'false');
   }
 
   // -------------------------------------------------------------------------
@@ -245,6 +318,8 @@ export class UI {
       .querySelectorAll<HTMLElement>('[data-layer]')
       .forEach((b) => b.classList.toggle('on', b.dataset.layer === g.renderer.layer));
     $('layers').querySelector('[data-regions]')?.classList.toggle('on', g.showRegions);
+    const activeLayer = LAYERS.find(l => l.id === g.renderer.layer)!;
+    $('analysis-label').textContent = ['terrain', 'flora', 'fauna'].includes(activeLayer.id) ? '☷ More layers' : `${activeLayer.icon} ${activeLayer.name}`;
     const sortBtn = $('tabs').querySelector<HTMLElement>('[data-sort]');
     if (sortBtn) sortBtn.textContent = this.sortBy === 'numbers' ? '↕ №' : this.sortBy === 'size' ? '↕ Size' : '↕ New';
     $('tabs')
@@ -324,7 +399,8 @@ export class UI {
     for (const [kind, title] of groups) {
       if (this.tab !== 'all' && this.tab !== kind) continue;
       const list = sim.alive
-        .filter((s) => s.kind === kind)
+        .filter((s) => s.kind === kind && (!this.creationsOnly || s.playerMade)
+          && (!this.speciesSearch || `${s.name} ${s.desc}`.toLowerCase().includes(this.speciesSearch)))
         .sort((a, b) => (this.sortBy === 'size' ? b.genome.size - a.genome.size : this.sortBy === 'newest' ? b.bornTick - a.bornTick : b.totalPop - a.totalPop));
       if (!list.length) continue;
       const max = Math.log10(1 + list[0].totalPop) || 1;
@@ -335,15 +411,30 @@ export class UI {
         if (sp.sentient) badge += '<span class="badge">✨</span>';
         if (sim.plagues.some((p) => p.speciesId === sp.id)) badge += '<span class="badge">🦠</span>';
         if (sim.tick - sp.bornTick < 60 && sp.id > 0) badge += '<span class="badge" style="color:var(--teal)">new</span>';
-        html += `<div class="sp${sp.id === g.selectedId ? ' on' : ''}" data-id="${sp.id}">
+        html += `<button type="button" class="sp${sp.id === g.selectedId ? ' on' : ''}" data-id="${sp.id}">
           <img class="thumb" src="${this.picture(sp)}" alt="" />
           <span class="nm"><i>${speciesNameHTML(sp)}${badge}</i><small>${sp.desc}</small></span>
           <span class="bar"><span style="width:${width}%;background:rgb(${sp.color.join(',')})"></span></span>
-        </div>`;
+        </button>`;
       }
     }
-    if (!html) html = '<div class="empty" style="color:var(--muted);padding:8px 2px">Nothing of this kind lives yet.</div>';
-    $('splist').innerHTML = html;
+    if (!html) html = `<div class="empty">${this.speciesSearch || this.creationsOnly ? 'No living species match these filters.' : 'Nothing of this kind lives yet.'}</div>`;
+    this.replacePanel($('splist'), html);
+  }
+
+  /** Refresh changing facts without throwing away keyboard focus on the same control. */
+  private replacePanel(el: HTMLElement, html: string): void {
+    if (this.panelHTML.get(el) === html) return;
+    this.panelHTML.set(el, html);
+    const active = document.activeElement as HTMLElement | null;
+    let selector: string | undefined;
+    if (active && el.contains(active)) {
+      if (active.dataset.id) selector = `button[data-id="${active.dataset.id}"]`;
+      else if (active.dataset.act) selector = `button[data-act="${active.dataset.act}"]`;
+      else if (active.dataset.guide) selector = `button[data-guide="${active.dataset.guide}"][data-dir="${active.dataset.dir}"]`;
+    }
+    el.innerHTML = html;
+    if (selector) el.querySelector<HTMLButtonElement>(selector)?.focus({ preventScroll: true });
   }
 
   private sparkline(sp: Species): string {
@@ -385,8 +476,10 @@ export class UI {
     const sim = g.sim;
     const el = $('detail');
     const sp = sim.species[g.selectedId];
+    el.classList.toggle('has-selection', !!sp);
+    if (this.detailId !== g.selectedId) { el.scrollTop = 0; this.detailId = g.selectedId; }
     if (!sp) {
-      el.innerHTML = `<h2>Selected species</h2><div class="empty">Pick a species from the list, or click the map, to study it, guide its evolution, strike it with plague or carry it across the sea.</div>`;
+      this.replacePanel(el, `<h2>Selected species</h2><div class="empty">Pick a species from the list, or click the map, to study it, guide its evolution, strike it with plague or carry it across the sea.</div>`);
       return;
     }
     const gn = sp.genome;
@@ -420,7 +513,7 @@ export class UI {
       traitRow(k, ti.icon, ti.label, ti.hint, gn[k]);
     }
 
-    el.innerHTML = `
+    this.replacePanel(el, `
       <div class="d-head">
         <img class="d-portrait" src="${this.picture(sp)}" alt="Picture of ${sp.name}" data-act="guide" title="Open the field guide" />
         <div><h3>${speciesNameHTML(sp)}</h3><div class="d-desc">${sp.desc}</div></div>
@@ -434,17 +527,18 @@ export class UI {
       </div>
       <div class="d-facts">${facts.map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join('')}</div>
       ${this.sparkline(sp)}
-      <div class="traits">${rows.join('')}</div>
-      ${sp.alive ? `<div class="guide-note">＋/− breeds a quick mutant at home (${sim.price(GUIDE_COST)}⚡, sheltered for 40 steps). The 🧪 Mutation lab designs one with several changes and lets you choose where it starts.</div>` : ''}
+      <button class="traits-toggle" data-act="traits" aria-expanded="${this.traitsOpen}">🧬 Traits &amp; evolution <span>${this.traitsOpen ? '−' : '+'}</span></button>
+      <div ${this.traitsOpen ? '' : 'hidden'}><div class="traits">${rows.join('')}</div>
+      ${sp.alive ? `<div class="guide-note">＋/− breeds a quick mutant at home (${sim.price(GUIDE_COST)}⚡, sheltered for 40 steps). The 🧪 Mutation lab designs one with several changes and lets you choose where it starts.</div>` : ''}</div>
       <div class="d-actions">
         ${sp.alive ? `<button data-act="follow" class="${g.followId === sp.id ? 'on' : ''}" title="Keep the camera on it as it moves (drag the map to stop)">🎥 ${g.followId === sp.id ? 'Following' : 'Follow'}</button>` : ''}
         <button data-act="stats" title="How it spread, what killed it, what ate it and what it ate">📊 Stats</button>
         <button data-act="cell" title="See how its cells are built">🔬 Cell</button>
         ${sp.alive ? `<button data-act="where" title="Rank every region by how well it would do there">🧭 Where to?</button><button data-act="lab" title="Design a mutant, see how it would fare, choose where it starts">🧪 Lab</button><button data-act="plague" title="Unleash a virus where it is most numerous (${sim.price(25)}⚡)">🦠 Plague</button><button data-act="ark" title="Carry a founding population elsewhere (${sim.price(20)}⚡)">🕊️ Ark</button>` : ''}
-      </div>`;
+      </div>`);
   }
 
-  private onDetailClick(e: PointerEvent): void {
+  private onDetailClick(e: MouseEvent): void {
     const g = this.game;
     const sim = g.sim;
     const t = e.target as HTMLElement;
@@ -464,7 +558,8 @@ export class UI {
     }
     const act = t.closest<HTMLElement>('[data-act]')?.dataset.act;
     if (!act) return;
-    if (act === 'close') g.select(-1);
+    if (act === 'traits') this.traitsOpen = !this.traitsOpen;
+    else if (act === 'close') g.select(-1);
     else if (act === 'guide') this.showGuide();
     else if (act === 'stats' && sp) {
       this.showStats(sp);
@@ -493,23 +588,47 @@ export class UI {
   private renderLog(): void {
     const sim = this.game.sim;
     const log = $('log');
-    if (this.logCount > sim.events.length) {
-      this.logCount = 0;
-      log.innerHTML = '';
-    }
     if (this.logCount === sim.events.length) return;
+    const matches = (ev: (typeof sim.events)[number]) => this.logFilter === 'all'
+      || (this.logFilter === 'major' ? ev.major : ev.speciesId !== undefined && sim.species[ev.speciesId]?.playerMade);
+    const visible = sim.events.map((ev, i) => ({ ev, i })).filter(({ ev }) => matches(ev));
+    const focusId = log.contains(document.activeElement) ? (document.activeElement as HTMLElement).closest<HTMLElement>('[data-event]')?.dataset.event : undefined;
+    const top = log.getBoundingClientRect().top;
+    const anchor = !this.followLog ? Array.from(log.children).find(el => el.getBoundingClientRect().bottom > top) as HTMLElement | undefined : undefined;
+    const offset = anchor ? anchor.getBoundingClientRect().top - top : 0;
+    if (!this.followLog && this.logCount >= 0) this.unreadLog += sim.events.slice(this.logCount).filter(matches).length;
     const frag = document.createDocumentFragment();
-    for (let i = sim.events.length - 1; i >= this.logCount; i--) {
-      const ev = sim.events[i];
-      const div = document.createElement('div');
+    for (const { ev, i } of visible.slice(-300).reverse()) {
+      const div = document.createElement(ev.speciesId !== undefined ? 'button' : 'div');
       div.className = `ev${ev.major ? ' major' : ''}${ev.speciesId !== undefined ? ' link' : ''}`;
+      div.dataset.event = String(i);
       if (ev.speciesId !== undefined) div.dataset.sp = String(ev.speciesId);
       div.innerHTML = `<span class="yr">${ev.year >= 1e9 ? (ev.year / 1e9).toFixed(2) + ' bn yr' : (ev.year / 1e6).toFixed(1) + ' m yr'}</span><span class="ic">${ev.icon}</span><span class="tx">${ev.text}</span>`;
       frag.appendChild(div);
     }
-    log.prepend(frag);
+    if (!visible.length) {
+      const empty = document.createElement('p');
+      empty.className = 'chronicle-empty';
+      empty.textContent = this.logFilter === 'creations' ? 'Your laboratory and guided creations will be recorded here.' : 'No turning points recorded yet.';
+      frag.append(empty);
+    }
+    log.replaceChildren(frag);
+    if (this.followLog) log.scrollTop = 0;
+    else if (anchor) {
+      const next = log.querySelector<HTMLElement>(`[data-event="${anchor.dataset.event}"]`);
+      if (next) log.scrollTop += next.getBoundingClientRect().top - top - offset;
+    }
+    $('chronicle-count').textContent = `${visible.length} ${visible.length === 1 ? 'event' : 'events'}`;
+    if (focusId !== undefined) log.querySelector<HTMLButtonElement>(`button[data-event="${focusId}"]`)?.focus({ preventScroll: true });
     this.logCount = sim.events.length;
-    while (log.childElementCount > 300) log.lastElementChild!.remove();
+    this.updateLogControls();
+  }
+
+  private updateLogControls(): void {
+    const latest = $('chronicle-latest');
+    latest.hidden = this.followLog && !this.unreadLog;
+    latest.textContent = this.unreadLog ? `Latest · ${this.unreadLog} new` : 'Latest';
+    $('chronicle-filters').querySelectorAll<HTMLElement>('[data-log-filter]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.logFilter === this.logFilter)));
   }
 
   setLegend(layer: Layer): void {
@@ -679,7 +798,7 @@ export class UI {
           <li><b>Model limits:</b> an exploratory game, not an Earth reconstruction. Plate motion, carbon units, species boundaries and the Mind goal are simplified. Radiation is a relative exposure index, not a dose measurement.</li>
           <li><b>Divine powers:</b> pick one, then click the map. Fire, rain and drought, minerals, acid, volcanoes, meteors, plagues and mutagens.</li>
           <li><b>The Ark:</b> select a species, choose Ark, click another continent. Newcomers can be devastating to creatures that evolved without them.</li>
-          <li><b>Guided evolution:</b> select a species and press ＋ or − on a trait. A daughter species with that change is born. Whether she survives is up to the world you made.</li>
+          <li><b>Guided evolution:</b> select a species, open <b>Traits &amp; evolution</b>, and press ＋ or − on a trait. A daughter species with that change is born. Whether she survives is up to the world you made.</li>
         </ul>
         <h3>Looking closer</h3>
         <ul>
@@ -688,7 +807,8 @@ export class UI {
           <li><b>Regions:</b> click the map to inspect the named region there: its forests and grassland, its plant-eaters, hunters and plants, its climate, and how well your selected species would do there. Area and Spot look closer.</li>
           <li><b>Mutants:</b> <b>🧭 Where to?</b> ranks every region for a species. The <b>🧪 Lab</b> designs a mutant with several changes, compares it with its parent region by region and releases it where you choose, sheltered while it settles. <b>🎥 Follow</b> keeps the camera on a species.</li>
           <li><b>Stats:</b> press <b>📊 Stats</b> on a species to see how it spread, what killed it, what ate it and what it ate. When a species dies out, the Chronicle tells you why.</li>
-          <li><b>Field guide (📖)</b> has a picture of every species, living and extinct. <b>🔊</b> switches between sound with music, effects only, and silence.</li>
+          <li><b>Library &amp; settings:</b> open the field guide for pictures of every species, living and extinct, or the Tree of Life for their ancestry. Sound switches between music and effects, effects only, and silence.</li>
+          <li><b>Overview:</b> find a species by name or description, or filter to <b>✦ Mine</b>. Chronicle can show all events, turning points or your creations; expand it to read more or hide it to give the map more room. Reading older events keeps your place; <b>Latest</b> returns to new arrivals.</li>
           <li><b>Chapters (🎬)</b> pauses the world for your narrated turning points. Replay unlocked scenes, preview the other recordings, or disable automatic breaks. Escape skips a scene. The player's speed, camera and pause setting are preserved.</li>
         </ul>
         <p>Everything costs <b>divine energy</b>, which returns slowly. The clock tracks geological epochs; short ecological episodes are sampled within them. <b>Space</b> pauses, <b>1</b> selects slow playback, <b>2–3</b> speed it up, <b>Esc</b> puts your powers down.</p>

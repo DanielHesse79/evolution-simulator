@@ -55,7 +55,7 @@ const STEPS: Step[] = [
   {
     target: ['#detail'],
     title: 'Guided evolution',
-    text: 'The ＋ and − buttons breed a daughter species with a changed trait. It costs divine energy, and natural selection decides whether she survives. Horns help on the open savanna but are a curse in the forest.',
+    text: 'Open Traits & evolution to find the ＋ and − buttons. They breed a daughter species with a changed trait. It costs divine energy, and natural selection decides whether she survives. Horns help on the open savanna but are a curse in the forest.',
   },
   {
     target: ['#atmos'],
@@ -70,12 +70,12 @@ const STEPS: Step[] = [
   {
     target: ['#layers'],
     title: 'Ways of seeing',
-    text: 'Switch the map to temperature, rainfall, acidity or minerals, or see where plants and animals live and where life is richest.',
+    text: 'Flora and Fauna show where plants and animals live. Open More layers for temperature, rainfall, acidity, minerals and diversity.',
   },
   {
     target: ['#chronicle'],
     title: 'The Chronicle',
-    text: 'Every first, every extinction and every catastrophe is written down here. Click an entry to select that species.',
+    text: 'Every first, every extinction and every catastrophe is written down here. Filter to turning points or your creations, and expand the history to read more. Click a species entry to select it.',
   },
   {
     target: ['#goal', '#energy'],
@@ -136,6 +136,16 @@ export class Tutorial {
 
   private go(i: number): void {
     this.i = Math.max(0, i);
+    for (const sel of STEPS[this.i].target ?? []) {
+      const el = document.querySelector<HTMLElement>(sel);
+      for (let parent = el?.parentElement; parent; parent = parent.parentElement) {
+        if (parent instanceof HTMLDetailsElement) parent.open = true;
+      }
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        if (rect.top < 0 || rect.bottom > window.innerHeight) el.scrollIntoView({ block: 'nearest' });
+      }
+    }
     this.start = { cellViews: this.ctx.cellViews() };
     this.doneAt = 0;
     this.render(false);

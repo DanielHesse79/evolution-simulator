@@ -1,6 +1,6 @@
 # Living Atlas illustrations
 
-The close-up map has 86 authored Canvas illustrations and body-plan variants. They share a
+The close-up map has 93 authored Canvas illustrations and body-plan variants. They share a
 100-unit drawing space, warm dark outlines, upper-left light, muted mineral and earth colours,
 and small anatomical accents. The artwork is vector geometry with transparent surroundings:
 there are no image downloads, font-dependent animal glyphs, or new runtime dependencies.
@@ -13,10 +13,18 @@ turtle and tortoise; large tyrant and swift raptor. It never changes the genome 
 
 `getSprite()` in `src/ui/renderer.ts` caches by resolved illustration key and quantised size.
 Motion and mirroring reuse those bitmaps. All icons currently returned by `describe()` and the
-four terrain/event figures have custom art; the emoji fallback is only for an unknown future icon.
+eleven terrain/event figures have custom art; the emoji fallback is only for an unknown future icon.
 At close-up zoom (8× and above), microbes and algal/lichen mats use magnified miniatures instead
 of dots, capped at two per patch to keep the water legible. Larger aquatic plants are illustrated
 at landscape zoom as well. These are representative symbols, not a common biological scale.
+
+Terrain miniatures include rolling hills, sand dunes, rock outcrops, sandy shores, coastal cliffs,
+glaciers and sea ice alongside mountains, snowy mountains, volcanoes and fire. The renderer
+chooses them from the existing elevation, sea level, moisture, temperature, ice, canopy and
+ground cover. A coast means a land patch neighbours water. These are illustrative cues, not
+new simulated landforms: dune transport, cliff erosion and individual glacier flow are not modelled.
+Forests and meadows continue to come from the actual vegetation. Sparse deterministic placement
+keeps the terrain readable and avoids drawing rocks and dunes through dense plant cover.
 
 Self-awareness does not determine anatomy. The upright human illustration requires an advanced,
 terrestrial, furry body with grasping limbs, little flight adaptation and an estimated mass of

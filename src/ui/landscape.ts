@@ -1482,6 +1482,63 @@ function mountain(p: Ink, snow = false, volcano = false): void {
 }
 add("mountain", "Mountain", "Landscape", (p) => mountain(p));
 add("snow-mountain", "Snow mountain", "Landscape", (p) => mountain(p, true));
+add("rolling-hills", "Rolling hills", "Landscape", p => {
+  p.shadow(89, 42);
+  p.path("M5 84Q22 37 48 38Q70 40 95 83Z", C.moss);
+  p.path("M8 85Q31 51 58 58Q81 61 95 85Z", C.leaf);
+  p.flat("M10 82Q28 45 47 41Q38 62 26 80Z", "#bdc69366");
+  p.line("M42 76Q56 68 74 72M20 84Q53 79 82 85", "#d1d8a17a", 1.6);
+});
+add("sand-dunes", "Sand dunes", "Landscape", p => {
+  p.shadow(89, 43);
+  p.path("M5 79Q27 57 42 23Q55 46 87 70L96 87L7 90Z", C.gold);
+  p.path("M5 80Q25 62 42 24L33 65L69 77Z", C.sand, false);
+  p.path("M4 88Q30 60 62 54Q62 77 96 87L93 92L8 92Z", C.sand);
+  p.flat("M62 55Q59 77 94 88L58 88L40 81Z", "#b0804e80");
+  p.line("M15 85Q40 68 58 65M24 90Q42 77 52 77M48 89L74 91", "#f0dfb57e", 1.3);
+});
+add("boulders", "Rock outcrop", "Landscape", p => {
+  p.shadow(88, 38);
+  p.path("M15 84L11 64L26 43L42 42L53 60L48 85Z", C.dark);
+  p.path("M38 85L36 50L54 27L74 30L87 54L83 87Z", C.slate);
+  p.flat("M37 50L55 28L65 41L58 65L39 67Z", "#c2c6ad80");
+  p.path("M67 89L65 72L78 61L91 72L91 88Z", C.brown);
+  p.line("M54 39L51 68L61 81M18 63L33 55M76 71L85 79", "#d9d9bb79", 1.5);
+});
+add("coastal-cliff", "Coastal cliffs", "Landscape", p => {
+  p.shadow(91, 39);
+  p.path("M9 40L32 25L68 28L88 47L78 87L52 94L15 81Z", C.slate);
+  p.path("M9 40L32 25L68 28L88 47L63 56L29 51Z", C.sand);
+  p.flat("M15 44L30 51L33 79L17 78Z", "#d4c6a07c");
+  p.line("M46 57L42 84M64 61L59 85M79 52L72 79", C.dark, 1.8);
+  p.path("M8 86Q30 77 52 88Q70 79 94 88L94 94L9 94Z", C.blue, false);
+  p.line("M14 85Q32 82 48 89M61 87Q76 82 89 88", "#dae5d5a0", 2);
+});
+add("beach", "Sandy shore", "Landscape", p => {
+  p.shadow(90, 42);
+  p.path("M7 65Q25 37 57 41Q74 43 94 63L94 91L7 91Z", C.sand);
+  p.path("M7 76Q24 63 43 72Q61 84 94 70L94 91L7 91Z", C.blue, false);
+  p.line("M9 71Q24 60 45 69Q62 82 92 68", C.cream, 2);
+  p.line("M13 82Q25 76 41 82M65 87L87 82", "#b7d1c680", 1.4);
+  p.oval(61, 57, 4, 2.5, C.cream);
+  p.oval(78, 61, 3, 2, C.slate);
+});
+add("glacier", "Glacier", "Landscape", p => {
+  p.shadow(93, 43);
+  p.path("M7 91L23 44L41 19L60 41L79 30L94 90Z", C.slate);
+  p.path("M9 90L24 44L41 20L51 43L63 53L78 32L86 59L94 90Z", "#c5d6d0");
+  p.flat("M41 20L41 53L32 72L31 91L57 91L51 64L61 54L51 43Z", "#f0edda");
+  p.line("M52 68L61 79L57 90M70 60L76 81M19 79L30 75", C.blue, 1.7);
+  p.line("M33 41L30 60M42 67L39 87", "#ffffff9c", 1.5);
+});
+add("ice-floe", "Sea ice", "Landscape", p => {
+  p.shadow(86, 39);
+  p.path("M7 62L26 39L54 35L86 48L94 71L75 87L20 85Z", C.blue);
+  p.path("M7 62L26 39L54 35L86 48L94 66L69 73L36 69L20 76Z", "#d5ded2");
+  p.flat("M26 40L54 36L68 50L35 57L9 62Z", "#f2eddb");
+  p.line("M54 44L50 59L61 68M28 56L30 68", C.slate, 1.5);
+  p.line("M20 78L35 72M68 79L85 72", "#c4ded79c", 1.7);
+});
 add("volcano", "Volcano", "Landscape", (p) => mountain(p, false, true));
 add("fire", "Fire", "Landscape", (p) => {
   p.shadow(93, 29);
@@ -1614,6 +1671,19 @@ export const LANDSCAPE_SPRITES = entries.map(({ key, label, group }) => ({
   label,
   group,
 }));
+
+/** Representative terrain ornaments chosen from the world's existing conditions. */
+export function terrainLandscapeKey(e: { water: boolean; temp: number; ice: number; height: number; moist: number; canopy: number; cover: number; coastal: boolean }): string | null {
+  if (e.water) return e.temp <= -1.5 ? 'ice-floe' : null;
+  if (e.canopy >= .3) return null;
+  if (e.ice > .35 && e.temp < 1) return 'glacier';
+  if (e.height > .55) return e.temp < 0 ? 'snow-mountain' : 'mountain';
+  if (e.coastal && e.cover < .3) return e.height > .18 ? 'coastal-cliff' : 'beach';
+  if (e.cover > .45) return null;
+  if (e.moist < .22 && e.temp > 8) return 'sand-dunes';
+  if (e.height > .25) return 'rolling-hills';
+  return e.cover < .12 ? 'boulders' : null;
+}
 export function paintLandscapeSprite(
   ctx: CanvasRenderingContext2D,
   iconOrKey: string,

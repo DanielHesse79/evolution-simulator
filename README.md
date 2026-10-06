@@ -24,7 +24,7 @@ Then open http://localhost:5173. `npm run build` produces a static site in `dist
   biosphere pulls the gases back towards its own balance, so lasting change means changing life itself.
 - **Divine powers**: wildfire, rain, drought, minerals, acid/alkali, mutagen, plague, the Ark (move a
   species to another continent), volcano and meteor. Pick one, then click the map.
-- **Guided evolution**: select a species and press ＋/− on a trait to breed a daughter species.
+- **Guided evolution**: select a species, open **Traits & evolution**, and press ＋/− on a trait to breed a daughter species.
   Natural selection decides whether she survives.
 - **Zoom in**: scroll over the map (or `+` / `−`, or the buttons in its corner) and drag to pan. Up
   close the map shows waves, drifting algae, kelp, forests, mountains, fires, volcanoes and the
@@ -44,8 +44,15 @@ Then open http://localhost:5173. `npm run build` produces a static site in `dist
   from the poles to the tropics.
 - **Pictures**: every species gets a portrait generated from its genes (body plan, horns, fur,
   armour, wings, warning colours, company), shown in the lists and in the **📖 Field guide**.
-- **Atlas illustrations**: the close-up map uses 86 coordinated drawings, including distinct fish,
-  lizard and plant variants. See [the artwork catalogue and review page](docs/landscape-art.md).
+- **Atlas illustrations**: the close-up map uses 93 coordinated drawings, including distinct fish,
+  lizard and plant variants, hills, dunes, rock outcrops, shores, coastal cliffs and ice.
+  See [the artwork catalogue and review page](docs/landscape-art.md).
+- **Overview and history**: time, speed, energy and purpose stay in the top bar; detailed map layers
+  are under **More layers**, and guides, chapters and sound are under **Library & settings**.
+  Find a species by name or description, or filter to **✦ Mine**. Chronicle has filters for all
+  events, turning points and your creations; expand it to read more, or hide it for more map space.
+  Reading older events preserves your position, with **Latest** showing new arrivals.
+  See [the interface layout and review checks](docs/game-ui.md).
 - **Stats and causes of death**: **📊 Stats** shows how a species spread (numbers, range and the
   continents it reached), what killed it (hunters, grazers, plague, fire, disasters, hunger), who ate
   it and what it ate. When a species declines or dies out, the game diagnoses why by comparing its

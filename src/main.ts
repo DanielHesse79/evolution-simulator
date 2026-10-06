@@ -1,5 +1,6 @@
 import './style.css';
 import './ui/atlas.css';
+import './ui/game-layout.css';
 import { POWERS, usePower, type PowerId } from './sim/powers';
 import { MAXS, Sim, type DifficultyId, type GoalId } from './sim/simulation';
 import { H, W } from './sim/world';
@@ -57,7 +58,7 @@ class App implements Game {
     const modes: SoundMode[] = ['all', 'effects', 'off'];
     const label = () => {
       const b = $('btn-sound');
-      b.textContent = { all: '🔊', effects: '🔉', off: '🔇' }[this.sound.mode];
+      b.textContent = { all: '🔊 Sound: all', effects: '🔉 Sound: effects', off: '🔇 Sound: off' }[this.sound.mode];
       b.title = { all: 'Sound: effects, ambience and music (click to change)', effects: 'Sound: effects and ambience, no music (click to change)', off: 'Sound off (click to change)' }[this.sound.mode];
     };
     label();
@@ -78,6 +79,7 @@ class App implements Game {
     this.bindKeys();
     window.addEventListener('resize', () => this.fitMap());
     new ResizeObserver(() => this.fitMap()).observe($('center'));
+    new ResizeObserver(() => this.fitMap()).observe($('chronicle'));
     this.fitMap();
     this.ui.showStart();
     requestAnimationFrame((t) => this.frame(t));
@@ -203,7 +205,7 @@ class App implements Game {
     const availW = center.clientWidth;
     const toolbarHeight = $('layers').offsetHeight + (center.querySelector('.atlas-heading')?.clientHeight ?? 0) + 24;
     const compact = window.matchMedia('(max-width: 900px)').matches;
-    const availH = compact ? availW * 9 / 16 : Math.max(100, center.clientHeight - toolbarHeight - 100);
+    const availH = compact ? availW * 9 / 16 : Math.max(100, center.clientHeight - toolbarHeight - $('chronicle').offsetHeight);
     let w = availW;
     let h = (w * 9) / 16;
     if (h > availH) {
@@ -222,7 +224,8 @@ class App implements Game {
   private bindKeys(): void {
     window.addEventListener('keydown', (e) => {
       if (this.chapters.active) return;
-      if ((e.target as HTMLElement).tagName === 'INPUT') return;
+      // Keep native keyboard activation, search and history scrolling independent of map shortcuts.
+      if (e.key !== 'Escape' && (e.target as HTMLElement).closest('input, textarea, select, button, summary, #log, [contenteditable="true"]')) return;
       if (e.key === 'Escape') {
         if (this.ui.modalOpen) this.ui.closeModal();
         else if (this.sim && this.tool !== 'inspect') this.setTool('inspect');

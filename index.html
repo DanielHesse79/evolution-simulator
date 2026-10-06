@@ -23,14 +23,17 @@
         <div class="speed" id="speed"></div>
         <div class="energy" id="energy" title="Divine energy: spent on every intervention, regained with time"></div>
         <div class="goal" id="goal"></div>
-        <div class="menu">
+        <details class="library-menu">
+          <summary>📖 Library &amp; settings</summary>
+          <div class="menu">
           <button id="btn-guide" title="Pictures of every species">📖 Field guide</button>
           <button id="btn-tree" title="The family tree of everything that ever lived">🌳 Tree of Life</button>
           <button id="btn-chapters" title="Narrated milestones and recordings" disabled>🎬 Chapters</button>
           <button id="btn-sound" title="Sound">🔊</button>
-          <button id="btn-help" title="How to play">?</button>
+          <button id="btn-help" title="How to play">? How to play</button>
           <button id="btn-new" title="Abandon this world and start another">New world</button>
-        </div>
+          </div>
+        </details>
       </header>
 
       <aside id="left">
@@ -39,14 +42,14 @@
           <div id="powers"></div>
           <div id="powerhint"></div>
         </section>
-        <section class="panel">
-          <h2>Air, Sun &amp; Sea</h2>
+        <details class="panel side-section">
+          <summary>Air, Sun &amp; Sea</summary>
           <div id="atmos"></div>
-        </section>
-        <section class="panel">
-          <h2>The World</h2>
+        </details>
+        <details class="panel side-section" open>
+          <summary>World overview</summary>
           <div id="worldstats"></div>
-        </section>
+        </details>
       </aside>
 
       <main id="center">
@@ -71,8 +74,20 @@
           <div id="tooltip"></div>
         </div>
         <section id="chronicle" class="panel">
-          <h2>Chronicle</h2>
-          <div id="log"></div>
+          <div class="chronicle-head">
+            <h2>Chronicle <span id="chronicle-count"></span></h2>
+            <div class="chronicle-actions">
+              <button id="chronicle-latest" hidden>Latest</button>
+              <button id="chronicle-expand" aria-expanded="false">Expand</button>
+              <button id="chronicle-collapse" aria-expanded="true" aria-controls="log">Hide</button>
+            </div>
+          </div>
+          <div id="chronicle-filters" aria-label="Chronicle filter">
+            <button data-log-filter="all" aria-pressed="true">All events</button>
+            <button data-log-filter="major" aria-pressed="false">Turning points</button>
+            <button data-log-filter="creations" aria-pressed="false">My creations</button>
+          </div>
+          <div id="log" role="region" aria-label="World history" tabindex="0"></div>
         </section>
       </main>
 
@@ -80,6 +95,10 @@
         <section class="panel" id="species-panel">
           <h2>Life <span id="spcount"></span></h2>
           <div id="tabs"></div>
+          <div class="species-tools">
+            <input id="species-search" type="search" aria-label="Find a species" placeholder="Find a species…" />
+            <button id="creations-filter" aria-pressed="false" title="Only show species you created">✦ Mine</button>
+          </div>
           <div id="splist"></div>
         </section>
         <section class="panel" id="detail"></section>

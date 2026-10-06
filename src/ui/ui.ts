@@ -5,6 +5,7 @@ import type { Genome } from '../sim/genome';
 import type { Species } from '../sim/species';
 import { CELL_EXAMPLES, buildCell } from './cell';
 import { portrait } from './portrait';
+import { speciesNameHTML, speciesNameText } from './species-label';
 import { tutorialSeen } from './tutorial';
 import { H, N, W } from '../sim/world';
 import { LAYERS, type Layer, type MapRenderer } from './renderer';
@@ -336,7 +337,7 @@ export class UI {
         if (sim.tick - sp.bornTick < 60 && sp.id > 0) badge += '<span class="badge" style="color:var(--teal)">new</span>';
         html += `<div class="sp${sp.id === g.selectedId ? ' on' : ''}" data-id="${sp.id}">
           <img class="thumb" src="${this.picture(sp)}" alt="" />
-          <span class="nm"><i>${sp.name}${badge}</i><small>${sp.desc}</small></span>
+          <span class="nm"><i>${speciesNameHTML(sp)}${badge}</i><small>${sp.desc}</small></span>
           <span class="bar"><span style="width:${width}%;background:rgb(${sp.color.join(',')})"></span></span>
         </div>`;
       }
@@ -391,7 +392,7 @@ export class UI {
     const gn = sp.genome;
     const parent = sim.species[sp.parentId];
     const facts: [string, string][] = [];
-    facts.push(['Appeared', `${fmtYear(sp.bornYear)}${parent ? ` from <a data-parent="${parent.id}">${parent.name}</a>` : ''}`]);
+    facts.push(['Appeared', `${fmtYear(sp.bornYear)}${parent ? ` from <a data-parent="${parent.id}">${speciesNameHTML(parent)}</a>` : ''}`]);
     if (sp.alive) {
       facts.push(['Numbers', `${formatHeadcount(sp.totalPop, gn.size)}`]);
       facts.push(['Range', this.rangeText(sp)]);
@@ -422,11 +423,12 @@ export class UI {
     el.innerHTML = `
       <div class="d-head">
         <img class="d-portrait" src="${this.picture(sp)}" alt="Picture of ${sp.name}" data-act="guide" title="Open the field guide" />
-        <div><h3>${sp.name}</h3><div class="d-desc">${sp.desc}</div></div>
+        <div><h3>${speciesNameHTML(sp)}</h3><div class="d-desc">${sp.desc}</div></div>
         <button class="x" data-act="close" title="Deselect">×</button>
       </div>
       <div class="d-tags">
         ${sp.alive ? '' : '<span class="dead">Extinct</span>'}
+        ${sp.playerMade ? '<span class="created-tag">Created by you</span>' : ''}
         ${sp.sentient ? '<span style="color:var(--gold);border-color:var(--gold)">Self-aware</span>' : ''}
         <span>${TIER_NAMES[gn.tier]}</span><span>${DIET_NAMES[gn.diet]}</span><span>${HABITAT_NAMES[gn.habitat]}</span>
       </div>
@@ -468,7 +470,7 @@ export class UI {
       this.showStats(sp);
       return;
     } else if (act === 'cell' && sp) {
-      this.showCell(sp.genome, sp.name, sp.desc, sp.id);
+      this.showCell(sp.genome, speciesNameHTML(sp), sp.desc, sp.id);
       return;
     } else if (!sp?.alive) return;
     else if (act === 'follow') g.setFollow(g.followId === sp.id ? -1 : sp.id);
@@ -480,10 +482,10 @@ export class UI {
       return;
     } else if (act === 'plague') {
       const res = usePower(sim, 'plague', sim.densestCell(sp), sp);
-      this.toast(res.ok ? `A plague is loose among ${sp.name}.` : res.msg, !res.ok);
+      this.toast(res.ok ? `A plague is loose among ${speciesNameText(sp)}.` : res.msg, !res.ok);
     } else if (act === 'ark') {
       g.setTool('transplant');
-      this.toast(`Click the map where ${sp.name} should be set down.`);
+      this.toast(`Click the map where ${speciesNameText(sp)} should be set down.`);
     }
     this.refresh(performance.now(), true);
   }
@@ -810,7 +812,7 @@ export class UI {
         const p = tot.get(sp)!;
         list += `<div class="site-sp${sp.id === g.selectedId ? ' on' : ''}" data-sp="${sp.id}">
           <img src="${this.picture(sp)}" alt="" />
-          <span class="nm"><i>${sp.name}</i><small>${sp.desc} · ${formatMass(sp.genome.size)} · ${formatHeadcount(p, sp.genome.size)}</small></span>
+          <span class="nm"><i>${speciesNameHTML(sp)}</i><small>${sp.desc} · ${formatMass(sp.genome.size)} · ${formatHeadcount(p, sp.genome.size)}</small></span>
           <span class="bar"><span style="width:${Math.max(6, (Math.log10(1 + p) / max) * 100)}%;background:rgb(${sp.color.join(',')})"></span></span>
         </div>`;
       }
@@ -845,7 +847,7 @@ export class UI {
       const here = tot.get(sel) ?? 0;
       const share = sel.totalPop > 0 ? here / sel.totalPop : 0;
       fit = `<div class="site-fit">
-        <div><span class="stars">${'★'.repeat(fc.stars)}${'☆'.repeat(5 - fc.stars)}</span> for <i>${sel.name}</i>${share > 0.005 ? ` <small>(${Math.round(share * 100)}% of them live here)</small>` : ''}</div>
+        <div><span class="stars">${'★'.repeat(fc.stars)}${'☆'.repeat(5 - fc.stars)}</span> for <i>${speciesNameHTML(sel)}</i>${share > 0.005 ? ` <small>(${Math.round(share * 100)}% of them live here)</small>` : ''}</div>
         <small>${fc.notes.join(' · ') || 'nothing in particular stands in its way'}</small>
         ${sim.pop[pl.cell * MAXS + sel.slot] > 0.02 ? `<small>Local variant at this spot: ${local.tempOpt.toFixed(1)} °C preference · pH ${local.phOpt.toFixed(1)} · inherited resistance ${Math.round(local.immunity * 100)}%</small>` : ''}
         ${fc.stars >= 1 && fc.bestCell >= 0 && share < 0.5 ? `<button data-site="bring">🕊️ Bring a band of them here (${sim.price(20)}⚡)</button>` : ''}
@@ -888,7 +890,7 @@ export class UI {
       const fc = this.siteForecast.f;
       if (sel?.alive && fc && fc.bestCell >= 0) {
         const res = usePower(sim, 'transplant', fc.bestCell, sel);
-        this.toast(res.ok ? `A band of ${sel.name} is set down in ${sim.regions[sim.regionOf[fc.bestCell]].name}.` : res.msg, !res.ok);
+        this.toast(res.ok ? `A band of ${speciesNameText(sel)} is set down in ${sim.regions[sim.regionOf[fc.bestCell]].name}.` : res.msg, !res.ok);
         this.siteForecast.key = '';
       }
     } else if (t.closest<HTMLElement>('[data-scope]')) g.setPlace(pl.cell, Number(t.closest<HTMLElement>('[data-scope]')!.dataset.scope));
@@ -939,7 +941,7 @@ export class UI {
       </div>`;
     const m = this.openModal(
       `<div class="card wide">
-        <div class="stat-head"><img src="${this.picture(sp)}" alt="" /><div><h2>🧭 Where could <i>${sp.name}</i> thrive?</h2><div class="sub">Every region scored for a band of newcomers: climate, food, rivals and hunters, as things stand now. ★★★ or more means they should take hold.</div></div><button class="secondary" id="close">Close</button></div>
+        <div class="stat-head"><img src="${this.picture(sp)}" alt="" /><div><h2>🧭 Where could <i>${speciesNameHTML(sp)}</i> thrive?</h2><div class="sub">Every region scored for a band of newcomers: climate, food, rivals and hunters, as things stand now. ★★★ or more means they should take hold.</div></div><button class="secondary" id="close">Close</button></div>
         <h3>Best new homes</h3>${good.map(row).join('') || '<div class="site-empty">Nowhere new would welcome it right now.</div>'}
         <h3>Where it lives now</h3>${now.map(row).join('') || '<div class="site-empty">Too few to call any region home.</div>'}
       </div>`,
@@ -959,7 +961,7 @@ export class UI {
       b.addEventListener('click', () => {
         const cell = Number(b.dataset.cell);
         const res = usePower(sim, 'transplant', cell, sp);
-        this.toast(res.ok ? `A band of ${sp.name} is set down in ${sim.regions[Number(b.dataset.bring)].name}.` : res.msg, !res.ok);
+        this.toast(res.ok ? `A band of ${speciesNameText(sp)} is set down in ${sim.regions[Number(b.dataset.bring)].name}.` : res.msg, !res.ok);
         if (res.ok) {
           this.forceClose();
           g.setPlace(cell, -1);
@@ -994,7 +996,7 @@ export class UI {
 
     const m = this.openModal(
       `<div class="card wide labcard">
-        <div class="stat-head"><img id="lab-pic" src="${this.picture(sp)}" alt="" /><div><h2>🧪 Mutation lab: <i>${sp.name}</i></h2><div class="sub" id="lab-desc"></div></div><button class="secondary" id="close">Close</button></div>
+        <div class="stat-head"><img id="lab-pic" src="${this.picture(sp)}" alt="" /><div><h2>🧪 Mutation lab: <i>${speciesNameHTML(sp)}</i></h2><div class="sub" id="lab-desc"></div></div><button class="secondary" id="close">Close</button></div>
         <div class="lab-grid">
           <div><h3>Change its genes</h3><div id="lab-traits"></div></div>
           <div><h3>How would it fare?</h3><div id="lab-fore"></div></div>
@@ -1159,7 +1161,7 @@ export class UI {
         .map(([id, v]) => {
           const o = sim.species[id];
           const share = v / total;
-          return `<div class="site-sp" data-stat-sp="${id}"><img src="${this.picture(o)}" alt="" /><span class="nm"><i>${o.name}${o.alive ? '' : ' †'}</i><small>${o.desc}</small></span><span class="pct">${share >= 0.01 ? Math.round(share * 100) : '<1'}%</span></div>`;
+          return `<div class="site-sp" data-stat-sp="${id}"><img src="${this.picture(o)}" alt="" /><span class="nm"><i>${speciesNameHTML(o)}${o.alive ? '' : ' †'}</i><small>${o.desc}</small></span><span class="pct">${share >= 0.01 ? Math.round(share * 100) : '<1'}%</span></div>`;
         })
         .join('');
     };
@@ -1171,7 +1173,7 @@ export class UI {
       `<div class="card wide statcard">
         <div class="stat-head">
           <img src="${this.picture(sp)}" alt="" />
-          <div><h2><i>${sp.name}</i></h2><div>${sp.desc} · ${TIER_NAMES[gn.tier]} · ${DIET_NAMES[gn.diet]}</div>
+          <div><h2><i>${speciesNameHTML(sp)}</i></h2><div>${sp.desc} · ${TIER_NAMES[gn.tier]} · ${DIET_NAMES[gn.diet]}</div>
           <div class="sub">${sp.alive ? `${formatHeadcount(sp.totalPop, gn.size)} alive in ${sp.cells} squares` : 'Extinct'} · appeared ${fmtYear(sp.bornYear)}</div></div>
           <button class="secondary" id="close">Close</button>
         </div>
@@ -1229,7 +1231,7 @@ export class UI {
           .map(
             (sp) => `<button class="gcard${sp.id === g.selectedId ? ' on' : ''}" data-gsp="${sp.id}">
               <img src="${this.picture(sp)}" alt="" />
-              <i>${sp.name}</i><span>${sp.desc}</span>
+              <i>${speciesNameHTML(sp)}</i><span>${sp.desc}</span>
               <small>${sp.alive ? `${formatHeadcount(sp.totalPop, sp.genome.size)} · ${formatMass(sp.genome.size)}` : `${fmtYear(sp.bornYear)} – ${fmtYear(sp.diedYear)}`}</small>
               ${!sp.alive && sp.deathCause ? `<small class="warn">💀 ${sp.deathCause}</small>` : sp.alive && sp.declineReason && sp.totalPop < 0.55 * sp.peakPop ? `<small class="warn">⚠ ${sp.declineReason}</small>` : ''}
             </button>`,

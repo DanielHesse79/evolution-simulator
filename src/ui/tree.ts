@@ -1,5 +1,6 @@
 import { yearAt, type Sim } from '../sim/simulation';
 import type { Species } from '../sim/species';
+import { speciesNameText } from './species-label';
 
 const ROW = 12;
 const TOP = 26;
@@ -109,11 +110,11 @@ export function drawTree(canvas: HTMLCanvasElement, sim: Sim, selectedId: number
       ctx.fill();
       ctx.fillStyle = sp.id === selectedId ? '#f2c14e' : 'rgba(219,228,245,0.92)';
       ctx.font = 'italic 11px "Palatino Linotype", Georgia, serif';
-      ctx.fillText(`${sp.icon} ${sp.name}`, x1 + 8, yy);
+      ctx.fillText(`${sp.icon} ${speciesNameText(sp)}`, x1 + 8, yy);
     } else if (sp.id === selectedId || sp.diedTick - sp.bornTick > 600) {
       ctx.fillStyle = sp.id === selectedId ? '#f2c14e' : 'rgba(135,148,179,0.75)';
       ctx.font = 'italic 10.5px "Palatino Linotype", Georgia, serif';
-      ctx.fillText(`† ${sp.name}`, x1 + 5, yy);
+      ctx.fillText(`† ${speciesNameText(sp)}`, x1 + 5, yy);
     }
   }
   return { rows, height };

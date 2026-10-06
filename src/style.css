@@ -635,6 +635,21 @@ input[type='range'] {
   margin-left: 4px;
 }
 
+.creation-mark {
+  display: inline-block;
+  margin-right: 4px;
+  color: var(--gold);
+  font-family: var(--sans);
+  font-style: normal;
+  font-size: 0.85em;
+  font-weight: 700;
+}
+
+.d-tags span.created-tag {
+  color: var(--gold);
+  border-color: var(--gold);
+}
+
 #detail {
   flex: 0 0 auto;
   max-height: 52%;
@@ -978,7 +993,7 @@ input[type='range'] {
   letter-spacing: 0.08em;
 }
 
-.tree-head span {
+.tree-head > span {
   color: var(--muted);
 }
 
@@ -1552,7 +1567,7 @@ input[type='range'] {
   color: var(--gold);
 }
 
-.gcard span {
+.gcard > span {
   font-size: 12px;
 }
 

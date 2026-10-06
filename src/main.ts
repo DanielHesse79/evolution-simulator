@@ -8,6 +8,7 @@ import { Sound, type SoundMode } from './ui/audio';
 import { Tutorial } from './ui/tutorial';
 import { Chapters } from './ui/chapters';
 import { UI, type Game } from './ui/ui';
+import { speciesNameHTML } from './ui/species-label';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -417,7 +418,7 @@ class App implements Game {
     const here = this.sim.speciesAt(c);
     const who = here
       .slice(0, 7)
-      .map((s) => `<div>${s.sp.icon} <i>${s.sp.name}</i></div>`)
+      .map((s) => `<div>${s.sp.icon} <i>${speciesNameHTML(s.sp)}</i></div>`)
       .join('');
     tip.innerHTML = `<h4>${w.biomeName(c)}</h4>
       <div class="sub">${place} · ${Math.abs(lat).toFixed(0)}°${lat >= 0 ? 'N' : 'S'}</div>

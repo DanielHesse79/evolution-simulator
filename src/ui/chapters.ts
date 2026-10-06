@@ -5,6 +5,7 @@ import type { Sound } from './audio';
 import { CHAPTERS, type Chapter } from './chapter-data';
 import { MapRenderer } from './renderer';
 import { portrait } from './portrait';
+import { speciesNameText } from './species-label';
 import './chapters.css';
 
 interface Host { sim(): Sim; sound: Sound; blocked(): boolean }
@@ -146,7 +147,7 @@ export class Chapters {
       const row = document.createElement('article');
       const heading = document.createElement('h2'); heading.textContent = chapter.title;
       const meta = document.createElement('p');
-      meta.textContent = saved ? `${fmtYear(saved.year)} · ${saved.name}` : chapter.condition;
+      meta.textContent = saved ? `${fmtYear(saved.year)} · ${this.subjectName(saved)}` : chapter.condition;
       const button = document.createElement('button');
       button.className = 'secondary';
       button.textContent = `${saved ? 'Replay' : 'Preview'} · ${Math.round(chapter.duration)}s`;
@@ -159,6 +160,11 @@ export class Chapters {
     this.dialog.querySelector('[data-close]')!.addEventListener('click', () => this.close());
     this.open();
     this.dialog.querySelector<HTMLButtonElement>('[data-close]')!.focus();
+  }
+
+  private subjectName(record: ChapterRecord): string {
+    return speciesNameText({ name: record.name,
+      playerMade: this.host.sim().species[record.speciesId]?.playerMade ?? false });
   }
 
   private previewRecord(id: ChapterId): ChapterRecord {
@@ -193,7 +199,7 @@ export class Chapters {
         <div class="chapter-controls"><button class="secondary" data-play>Pause narration</button><button class="secondary" data-voice></button><button class="secondary" data-subtitles></button><button class="primary" data-skip>${fromLibrary ? 'Back to chapters' : 'Skip · return to the world'}</button></div>
       </footer>`;
     this.dialog.querySelector('#chapter-title')!.textContent = chapter.title;
-    this.dialog.querySelector('[data-subject]')!.textContent = preview ? 'An illustrative scene. Your world has not reached this chapter.' : `${record.name} · ${fromLibrary ? 'recorded lineage, present-day landscape' : 'a turning point in your world'}`;
+    this.dialog.querySelector('[data-subject]')!.textContent = preview ? 'An illustrative scene. Your world has not reached this chapter.' : `${this.subjectName(record)} · ${fromLibrary ? 'recorded lineage, present-day landscape' : 'a turning point in your world'}`;
     this.dialog.querySelector('[data-portrait]')!.innerHTML = portrait(record.genome, record.hue, Math.max(1, record.speciesId));
     this.dialog.querySelector('[data-caption]')!.textContent = record.id === 'warmth' ? 'Mammal-like reconstruction · lactation is not simulated' : record.id === 'mind' ? 'Ape-like reconstruction · an open-ended future' : record.id === 'spark' ? 'One small beginning. Countless possible futures.' : preview ? 'Illustrative body plan' : 'Drawn from this lineage’s inherited traits';
     this.dialog.querySelector('[data-transcript]')!.textContent = chapter.transcript;

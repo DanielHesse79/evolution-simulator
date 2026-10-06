@@ -6,6 +6,7 @@ import { H, W } from './sim/world';
 import { MapRenderer, type Layer } from './ui/renderer';
 import { Sound, type SoundMode } from './ui/audio';
 import { Tutorial } from './ui/tutorial';
+import { Chapters } from './ui/chapters';
 import { UI, type Game } from './ui/ui';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -36,6 +37,7 @@ class App implements Game {
   /** A press on the map: it becomes a drag (pan) once the pointer moves far enough, otherwise a click. */
   private drag: { x: number; y: number; lastX: number; lastY: number; moved: boolean; button: number } | null = null;
   tutorial: Tutorial;
+  chapters: Chapters;
   sound = new Sound();
   private heardEvents = 0;
   private mixFrame = 0;
@@ -67,8 +69,9 @@ class App implements Game {
       zoom: () => this.renderer?.zoom ?? 1,
       selectedId: () => this.selectedId,
       cellViews: () => this.ui.cellViews,
-      modalOpen: () => this.ui.modalOpen,
+      modalOpen: () => this.ui.modalOpen || !!this.chapters?.active,
     });
+    this.chapters = new Chapters({ sim: () => this.sim, sound: this.sound, blocked: () => this.ui.modalOpen || this.tutorial.active });
     this.bindMap();
     this.bindKeys();
     window.addEventListener('resize', () => this.fitMap());
@@ -95,6 +98,7 @@ class App implements Game {
     this.ui.setLegend(this.renderer.layer);
     this.fitMap();
     this.ui.refresh(performance.now(), true);
+    this.chapters.reset(this.sim);
     if (tutorial) this.tutorial.begin();
     else if (this.tutorial.active) this.tutorial.stop();
   }
@@ -215,6 +219,7 @@ class App implements Game {
 
   private bindKeys(): void {
     window.addEventListener('keydown', (e) => {
+      if (this.chapters.active) return;
       if ((e.target as HTMLElement).tagName === 'INPUT') return;
       if (e.key === 'Escape') {
         if (this.ui.modalOpen) this.ui.closeModal();
@@ -442,19 +447,22 @@ class App implements Game {
     const sim = this.sim;
     if (sim) {
       const active = sim.status === 'running' || sim.freePlay;
-      if (!this.paused && active) {
+      if (!this.paused && !this.chapters.active && active) {
         this.acc += (dt * TPS[this.speed]) / 1000;
         const t0 = performance.now();
         let steps = 0;
         while (this.acc >= 1 && performance.now() - t0 < 14) {
           sim.step();
+          this.chapters.observe();
           this.acc -= 1;
           steps++;
+          if (this.chapters.hasPending && !this.ui.modalOpen && !this.tutorial.active) break;
           if (sim.status !== 'running' && !sim.freePlay) break;
         }
         if (this.acc > 2) this.acc = 2;
         if (steps) this.dirty = true;
       }
+      this.chapters.update(now);
       if (this.dirty && now - this.lastBase > 150) {
         this.renderer.renderBase();
         this.lastBase = now;
@@ -474,7 +482,7 @@ class App implements Game {
       });
       this.ui.refresh(now);
       if (this.hover >= 0 && now - this.lastTooltip > 400) this.updateTooltip();
-      if (sim.status !== 'running' && !this.endShown) {
+      if (sim.status !== 'running' && !this.endShown && !this.chapters.active && !this.chapters.hasPending) {
         this.endShown = true;
         this.ui.showEnd();
       }

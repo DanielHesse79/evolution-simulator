@@ -1,7 +1,7 @@
 import { H, N, W } from '../sim/world';
 import { MAXS, VOLCANO_LIFE, type Sim } from '../sim/simulation';
 import type { Species } from '../sim/species';
-import { paintLandscapeSprite } from './landscape';
+import { landscapeSpriteKey, paintLandscapeSprite } from './landscape';
 
 export type Layer = 'terrain' | 'temp' | 'moist' | 'ph' | 'minerals' | 'flora' | 'fauna' | 'richness' | 'radiation' | 'uv' | 'tectonics';
 
@@ -110,7 +110,7 @@ interface Sprite {
 }
 const sprites = new Map<string, Sprite>();
 
-/** Emoji are slow to draw as text, so each one is rasterised once per size and reused. */
+/** Atlas paths are rasterised once per body-plan variant and size, never per frame. */
 function getSprite(icon: string, px: number): Sprite {
   const size = Math.max(8, Math.min(192, Math.round(px / 4) * 4));
   const key = `${icon}|${size}`;
@@ -146,7 +146,7 @@ function drawSprite(ctx: CanvasRenderingContext2D, icon: string, x: number, y: n
   } else ctx.drawImage(s.c, x - d / 2, y - d / 2, d, d);
 }
 
-/** Icons that look like flat tiles; up close these are drawn as specks of colour instead. */
+/** Microscopic life stays a sparse bloom at distance, with magnified illustrations up close. */
 const FLAT = new Set(['🟫', '🟩', '🟢', '🦠', '🧫']);
 
 export interface OverlayState {
@@ -918,7 +918,8 @@ export class MapRenderer {
       return best;
     };
     const specks = (sp: Species, p: number, c: number, cellX: number, cellY: number, maxN: number, rad: number, water: boolean) => {
-      const n = Math.round(Math.min(maxN, Math.log10(1 + p) * 3) * dens);
+      const illustrated = this.zoom >= 8 || !FLAT.has(sp.icon);
+      const n = Math.round(Math.min(illustrated ? 2 : maxN, Math.log10(1 + p) * 3) * dens);
       if (n <= 0) return;
       ctx.fillStyle = `rgb(${sp.color[0]},${sp.color[1]},${sp.color[2]})`;
       ctx.beginPath();
@@ -928,10 +929,14 @@ export class MapRenderer {
         if (wet(cellX + u, cellY + v) !== water) continue;
         const px = (cellX + u - x0) * k;
         const py = (cellY + v - y0) * ky;
+        if (illustrated) {
+          drawSprite(ctx, landscapeSpriteKey(sp.icon, sp.genome), px, py, k * (sp.kind === 'microbe' ? 0.29 : 0.36));
+          continue;
+        }
         ctx.moveTo(px + rad, py);
         ctx.arc(px, py, rad, 0, Math.PI * 2);
       }
-      ctx.fill();
+      if (!illustrated) ctx.fill();
     };
 
     ctx.globalAlpha = alpha;
@@ -1013,7 +1018,7 @@ export class MapRenderer {
               const u = 0.15 + 0.7 * hash(c, i * 5 + 60);
               const v = 0.15 + 0.7 * hash(c, i * 5 + 61);
               if (!wet(x + u, y + v)) continue;
-              trees.push([(x + u - x0) * k + Math.sin(t * 0.8 + i + c) * k * 0.015, (y + v - y0) * ky, k * 0.4 * (0.85 + 0.3 * hash(c, i * 5 + 62)), kelp?.icon ?? '🌿']);
+              trees.push([(x + u - x0) * k + Math.sin(t * 0.8 + i + c) * k * 0.015, (y + v - y0) * ky, k * 0.4 * (0.85 + 0.3 * hash(c, i * 5 + 62)), kelp ? landscapeSpriteKey(kelp.icon, kelp.genome) : 'kelp']);
             }
           }
           continue;
@@ -1035,7 +1040,7 @@ export class MapRenderer {
         const h = w.elev[c] - sea;
         if (can > 0.12) {
           const tree = dominant(tall, base, false);
-          const icon = tree && !FLAT.has(tree.icon) ? tree.icon : w.temp[c] < 8 ? '🌲' : '🌳';
+          const icon = tree && !FLAT.has(tree.icon) ? landscapeSpriteKey(tree.icon, tree.genome) : w.temp[c] < 8 ? '🌲' : '🌳';
           // one or two trees per patch, on opposite halves so they do not pile up
           const n = can > 0.55 && dens > 0.4 ? 2 : 1;
           for (let i = 0; i < n; i++) {
@@ -1075,7 +1080,7 @@ export class MapRenderer {
             }
           } else if (herb && FLAT.has(herb.icon)) specks(herb, pop[base + herb.slot], c, x, y, 10, dotR * 1.6, false);
           else {
-            const icon = herb?.icon ?? '🌱';
+            const icon = herb ? landscapeSpriteKey(herb.icon, herb.genome) : '🌱';
             const n = cov > 0.5 && dens > 0.4 ? 2 : 1;
             for (let i = 0; i < n; i++) {
               const u = 0.12 + 0.76 * hash(c, i * 3 + 20);
@@ -1136,9 +1141,9 @@ export class MapRenderer {
             const water = wet(x + u, y + v);
             if (g.habitat === 'aquatic' && !water) continue;
             if (g.habitat === 'terrestrial' && water && g.flight <= 0.4) continue;
-            // emoji face left; flip them while they wander to the right
+            // Lateral atlas illustrations face left; mirror rightward movement.
             const flip = Math.cos(t * pace * 0.6 + ph) > 0;
-            creatures.push([(x + u - x0) * k, (y + v - y0) * ky, size, sp.icon, flip, sp === selected]);
+            creatures.push([(x + u - x0) * k, (y + v - y0) * ky, size, landscapeSpriteKey(sp.icon, g), flip, sp === selected]);
           }
         }
       }

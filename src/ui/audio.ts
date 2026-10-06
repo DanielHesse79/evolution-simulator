@@ -1,5 +1,5 @@
 /**
- * Every sound in the game is synthesised on the fly with the Web Audio API: no sound files.
+ * Gameplay sound is synthesised with the Web Audio API. Chapter recordings are played separately.
  * There are three layers: one-shot effects for events and divine acts, an ambient bed that follows
  * what the map is showing (sea, wind, fire, birdsong), and a slow generative music pad.
  */
@@ -41,6 +41,7 @@ export class Sound {
   private chordIndex = 0;
   private nextChirp = 0;
   private playedThisFrame = 0;
+  private ducked = false;
 
   constructor() {
     try {
@@ -62,7 +63,7 @@ export class Sound {
     const ctx = new AC();
     this.ctx = ctx;
     this.master = ctx.createGain();
-    this.master.gain.value = this.mode === 'off' ? 0 : 0.8;
+    this.master.gain.value = this.mode === 'off' || this.ducked ? 0 : 0.8;
     const comp = ctx.createDynamicsCompressor();
     this.master.connect(comp).connect(ctx.destination);
     this.fx = this.bus(0.9);
@@ -119,8 +120,14 @@ export class Sound {
     }
     if (!this.ctx) return;
     const t = this.ctx.currentTime;
-    this.master.gain.setTargetAtTime(mode === 'off' ? 0 : 0.8, t, 0.1);
+    this.master.gain.setTargetAtTime(mode === 'off' || this.ducked ? 0 : 0.8, t, 0.1);
     this.music.gain.setTargetAtTime(mode === 'all' ? 0.5 : 0, t, 0.3);
+  }
+
+  /** Supplied chapter tracks include their own score; leave room for the recording. */
+  setDucked(ducked: boolean): void {
+    this.ducked = ducked;
+    if (this.ctx) this.master.gain.setTargetAtTime(this.mode === 'off' || ducked ? 0 : 0.8, this.ctx.currentTime, 0.15);
   }
 
   // -------------------------------------------------------------------------

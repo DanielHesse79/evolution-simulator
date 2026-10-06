@@ -37,6 +37,7 @@ export interface Game {
   goTo(zoom: number): void;
   markDirty(): void;
   sound: { play(name: string): void };
+  chapters: { enabled: boolean; active: boolean; setEnabled(value: boolean): void; openLibrary(): void };
 }
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -172,6 +173,7 @@ export class UI {
 
     $('btn-tree').addEventListener('click', () => this.showTree());
     $('btn-guide').addEventListener('click', () => this.showGuide());
+    $('btn-chapters').addEventListener('click', () => g.chapters.openLibrary());
     $('site').addEventListener('pointerdown', (e) => this.onSiteClick(e));
     $('zoomlevels').addEventListener('click', (e) => {
       const b = (e.target as HTMLElement).closest<HTMLElement>('[data-level]');
@@ -186,6 +188,7 @@ export class UI {
 
   /** Reset per-world UI state when a new world begins. */
   reset(): void {
+    $<HTMLButtonElement>('btn-chapters').disabled = false;
     this.logCount = 0;
     $('log').innerHTML = '';
     this.dragging = null;
@@ -580,6 +583,7 @@ export class UI {
         <h3>Choose your purpose</h3>
         <div class="goals">${GOALS.map((x) => `<button class="goalcard${x.id === goal ? ' on' : ''}" data-goal="${x.id}"><span class="gi">${x.icon}</span><div><b>${x.name}</b><span>${x.blurb}</span></div></button>`).join('')}</div>
         <label class="tutrow"><input type="checkbox" id="tut" ${tutorialSeen() ? '' : 'checked'} /> Show me around first (a short guided tour)</label>
+        <label class="tutrow"><input type="checkbox" id="chapter-breaks" ${this.game.chapters.enabled ? 'checked' : ''} /> Narrated chapter breaks at life's turning points</label>
         <h3>Difficulty</h3>
         <div class="diffs">${DIFFICULTIES.map((d) => `<button class="diffcard${d.id === diff ? ' on' : ''}" data-diff="${d.id}"><b>${d.icon} ${d.name}</b><span>${d.blurb}</span></button>`).join('')}</div>
         <div class="seedrow"><label for="seed">World seed</label><input id="seed" value="${1 + Math.floor(Math.random() * 999999)}" inputmode="numeric" /><button id="reroll" title="Another random world">🎲</button></div>
@@ -612,6 +616,7 @@ export class UI {
       btn.disabled = true;
       const n = Math.abs(Math.floor(Number(seed.value))) || 1;
       const tour = m.querySelector<HTMLInputElement>('#tut')?.checked ?? false;
+      this.game.chapters.setEnabled(m.querySelector<HTMLInputElement>('#chapter-breaks')!.checked);
       // let the button repaint before the heavy world generation
       setTimeout(() => {
         this.resumeAfterModal = false;
@@ -682,6 +687,7 @@ export class UI {
           <li><b>Mutants:</b> <b>🧭 Where to?</b> ranks every region for a species. The <b>🧪 Lab</b> designs a mutant with several changes, compares it with its parent region by region and releases it where you choose, sheltered while it settles. <b>🎥 Follow</b> keeps the camera on a species.</li>
           <li><b>Stats:</b> press <b>📊 Stats</b> on a species to see how it spread, what killed it, what ate it and what it ate. When a species dies out, the Chronicle tells you why.</li>
           <li><b>Field guide (📖)</b> has a picture of every species, living and extinct. <b>🔊</b> switches between sound with music, effects only, and silence.</li>
+          <li><b>Chapters (🎬)</b> pauses the world for your narrated turning points. Replay unlocked scenes, preview the other recordings, or disable automatic breaks. Escape skips a scene. The player's speed, camera and pause setting are preserved.</li>
         </ul>
         <p>Everything costs <b>divine energy</b>, which returns slowly. The clock tracks geological epochs; short ecological episodes are sampled within them. <b>Space</b> pauses, <b>1–3</b> set the speed, <b>Esc</b> puts your powers down.</p>
         <div class="btnrow"><button class="secondary" id="cells">🔬 Cells compared</button><button class="secondary" id="tour">🧭 Guided tour</button><button class="primary" id="ok">Back to the world</button></div>

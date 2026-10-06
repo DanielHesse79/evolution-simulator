@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Living Atlas · illustration proof</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #102529;
+        color: #e9e2cd;
+        font:
+          14px/1.5 system-ui,
+          sans-serif;
+      }
+      header {
+        padding: 28px 36px;
+        background: #142e31;
+        border-bottom: 1px solid #a5b79540;
+      }
+      h1 {
+        font:
+          36px Georgia,
+          serif;
+        margin: 4px 0 8px;
+      }
+      header p {
+        color: #b3c7bc;
+        margin: 6px 0;
+      }
+      .eyebrow {
+        color: #cbb583;
+        font-size: 10px;
+        letter-spacing: 0.23em;
+      }
+      nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 20px 0 0;
+      }
+      button {
+        font: inherit;
+        background: #203d3c;
+        color: #e2e6cd;
+        border: 1px solid #77938366;
+        border-radius: 5px;
+        padding: 6px 12px;
+        cursor: pointer;
+      }
+      button[aria-pressed="true"] {
+        background: #d7c08b;
+        color: #203731;
+      }
+      main {
+        padding: 12px 36px 36px;
+      }
+      h2 {
+        font:
+          24px Georgia,
+          serif;
+        margin: 26px 0 12px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(156px, 1fr));
+        gap: 12px;
+      }
+      article {
+        border: 1px solid #b4bd8e2b;
+        border-radius: 10px;
+        overflow: hidden;
+        background: #1d3837;
+        text-align: center;
+      }
+      article > canvas {
+        display: block;
+        width: 100%;
+        height: 130px;
+        object-fit: contain;
+        background: radial-gradient(ellipse at 40% 25%, #60755f, #304d45);
+      }
+      article.sea > canvas {
+        background: radial-gradient(ellipse at 40% 25%, #578883, #264e5c);
+      }
+      h3 {
+        font:
+          13px system-ui,
+          sans-serif;
+        margin: 10px 3px 6px;
+        color: #f0e6cc;
+      }
+      .sizes {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        height: 55px;
+        background: #142e2e;
+      }
+      .sizes canvas {
+        flex: none;
+      }
+      .scale {
+        font:
+          10px ui-monospace,
+          monospace;
+        color: #b2c3ad;
+        padding: 5px 0 9px;
+      }
+      #checks {
+        font:
+          12px ui-monospace,
+          monospace;
+        color: #c4dbaa;
+      }
+      footer {
+        padding: 0 36px 24px;
+        color: #9bb8ac;
+      }
+      a {
+        color: #d9c598;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="eyebrow">THE LIVING ATLAS · ILLUSTRATION PROOF</div>
+      <h1>A shared language for life</h1>
+      <p>
+        Hand-drawn Canvas miniatures · warm ink, mineral pigments, upper-left
+        light
+      </p>
+      <p id="checks" role="status">Checking every drawing…</p>
+      <nav aria-label="Illustration groups"></nav>
+    </header>
+    <main></main>
+    <footer>
+      Small samples show actual map sizes: 16, 24 and 40 pixels. Microscopic
+      forms are illustrative magnifications. <a href="/">Return to the game</a>
+    </footer>
+    <script type="module" src="../scripts/sprite-atlas.ts"></script>
+  </body>
+</html>

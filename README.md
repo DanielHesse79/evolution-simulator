@@ -44,6 +44,8 @@ Then open http://localhost:5173. `npm run build` produces a static site in `dist
   from the poles to the tropics.
 - **Pictures**: every species gets a portrait generated from its genes (body plan, horns, fur,
   armour, wings, warning colours, company), shown in the lists and in the **📖 Field guide**.
+- **Atlas illustrations**: the close-up map uses 86 coordinated drawings, including distinct fish,
+  lizard and plant variants. See [the artwork catalogue and review page](docs/landscape-art.md).
 - **Stats and causes of death**: **📊 Stats** shows how a species spread (numbers, range and the
   continents it reached), what killed it (hunters, grazers, plague, fire, disasters, hunger), who ate
   it and what it ate. When a species declines or dies out, the game diagnoses why by comparing its
@@ -54,6 +56,7 @@ Then open http://localhost:5173. `npm run build` produces a static site in `dist
 - **Cells**: **🔬 Cell** on any species draws how we imagine its cells are built (prokaryote, plant
   or animal cell, organelles labelled) and lists the cell types its body is made of. The help screen
   has textbook cells to compare with.
+- **Narrated chapters**: five supplied recordings accompany the origin of life, landfall, flight, a mammal-like body plan and a questioning mind. Optional chapter breaks pause the simulation; replay or preview them from **Chapters**. See [playback, triggers and scientific limits](docs/chapters.md).
 - **Guided tour**: offered on the start screen the first time, and from the help screen at any time.
 - **Keys**: `Space` pause, `1`–`3` speed, `+`/`−`/`0` zoom, arrow keys pan, `Esc` put the current power down.
 

@@ -385,6 +385,20 @@ export function mutate(parent: Genome, rng: RNG, env: MutEnv): { g: Genome; majo
 // Description and naming
 // ---------------------------------------------------------------------------
 
+/** Presentation bounds for the upright human illustration, not limits on intelligence or evolution. */
+export const HUMANOID_MASS_KG = { min: 20, max: 200 } as const;
+// Invert massKg once; comparing sizes avoids floating-point drift at the bounds.
+const HUMANOID_SIZE = {
+  min: (Math.log10(HUMANOID_MASS_KG.min) + 11) / 1.6,
+  max: (Math.log10(HUMANOID_MASS_KG.max) + 11) / 1.6,
+};
+
+export function hasHumanoidBody(g: Genome): boolean {
+  return g.tier === 4 && !isAuto(g) && g.habitat === 'terrestrial'
+    && g.fur > 0.4 && g.grasp > 0.5 && g.flight < 0.35
+    && g.size >= HUMANOID_SIZE.min && g.size <= HUMANOID_SIZE.max;
+}
+
 /** A plain-language description and an emoji for a body plan. */
 export function describe(g: Genome): { desc: string; icon: string } {
   const aquatic = g.habitat === 'aquatic';
@@ -401,7 +415,7 @@ export function describe(g: Genome): { desc: string; icon: string } {
   }
   if (isAuto(g)) return describePlant(g);
 
-  if (g.intel >= SENTIENCE) return { desc: 'Self-aware toolmaker', icon: '🧑' };
+  if (g.intel >= SENTIENCE && hasHumanoidBody(g)) return { desc: 'Self-aware toolmaker', icon: '🧑' };
 
   let noun: string;
   let icon: string;
@@ -428,7 +442,8 @@ export function describe(g: Genome): { desc: string; icon: string } {
   }
 
   const adj: string[] = [];
-  if (g.intel > 0.55) adj.push('clever');
+  if (g.intel >= SENTIENCE) adj.push('self-aware');
+  else if (g.intel > 0.55) adj.push('clever');
   if (g.size >= 9.2) adj.push('colossal');
   else if (g.tier === 4 && g.size >= 8.3 && !noun.includes('giant')) adj.push('giant');
   if (g.fur > 0.7 && g.tempOpt < 6 && g.tier === 4) adj.push('woolly');
@@ -507,7 +522,7 @@ function describeVertebrate(g: Genome): [string, string] {
       if (g.size >= 8) return ['giant predator', '🐅'];
       return ['stalking predator', '🦊'];
     }
-    if (g.grasp > 0.5) return g.intel > 0.5 ? ['ape-like forager', '🦍'] : ['tree-climbing forager', '🐒'];
+    if (g.grasp > 0.5 && g.size < 8.3) return g.intel > 0.5 ? ['ape-like forager', '🦍'] : ['tree-climbing forager', '🐒'];
     if (g.size >= 7.5) return ['bear-like forager', '🐻'];
     return g.size < 5 ? ['scurrying forager', '🐀'] : ['rooting forager', '🐗'];
   }

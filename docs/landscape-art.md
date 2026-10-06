@@ -18,6 +18,13 @@ At close-up zoom (8× and above), microbes and algal/lichen mats use magnified m
 of dots, capped at two per patch to keep the water legible. Larger aquatic plants are illustrated
 at landscape zoom as well. These are representative symbols, not a common biological scale.
 
+Self-awareness does not determine anatomy. The upright human illustration requires an advanced,
+terrestrial, furry body with grasping limbs, little flight adaptation and an estimated mass of
+20–200 kg. Those are presentation bounds, not biological limits on intelligence. Larger or
+differently shaped self-aware animals retain their own body-plan icon and portrait, with
+"Self-aware" in the description. For example, a 1.8-tonne omnivorous furry animal retains a
+bear-like form. The mass conversion, intelligence, Awakening goal and evolution rules are unchanged.
+
 ## Review and validation
 
 With the development server running, open `/tools/sprite-atlas.html`. The contact sheet has

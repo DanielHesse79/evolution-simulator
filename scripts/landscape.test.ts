@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { landscapeSpriteKey, LANDSCAPE_SPRITES } from "../src/ui/landscape";
-import { describe, type Genome } from "../src/sim/genome";
+import { describe, formatMass, hasHumanoidBody, massKg, SENTIENCE, type Genome } from "../src/sim/genome";
+import { portrait } from "../src/ui/portrait";
 import { Sim } from "../src/sim/simulation";
 
 const keys = new Set(LANDSCAPE_SPRITES.map((s) => s.key));
@@ -88,4 +89,39 @@ test("plant variants use habitat and body plan without altering the genome", () 
     assert.equal(keyFor(g), expected);
     assert.deepEqual(g, before);
   }
+});
+
+const sizeForKg = (kg: number) => (Math.log10(kg) + 11) / 1.6;
+const intelligent = (patch: Partial<Genome> = {}) => body({
+  diet: 'omni', size: sizeForKg(70), fur: .7, grasp: .8, social: .8, intel: SENTIENCE, ...patch,
+});
+test('a 1.8-tonne self-aware animal keeps its large body, weight and intelligence', () => {
+  const g = intelligent({ size: sizeForKg(1800) }), before = { ...g };
+  assert.equal(formatMass(g.size), '1.8 t');
+  assert.equal(describe(g).desc, 'Self-aware giant bear-like forager');
+  assert.equal(keyFor(g), 'bear');
+  assert.equal(hasHumanoidBody(g), false);
+  assert.doesNotMatch(portrait(g, 30, 1), /M136,10 L132,120/); // upright figure's held spear
+  assert.ok(Math.abs(massKg(g.size) - 1800) < .00001);
+  assert.deepEqual(g, before);
+});
+test('human art requires appropriate mass and anatomy; other self-aware bodies stay distinct', () => {
+  const human = intelligent();
+  assert.equal(formatMass(human.size), '70 kg');
+  assert.equal(keyFor(human), 'toolmaker');
+  assert.match(portrait(human, 30, 1), /M136,10 L132,120/);
+  for (const kg of [20, 200]) {
+    assert.equal(keyFor(intelligent({ size: sizeForKg(kg) })), 'toolmaker');
+  }
+  for (const patch of [
+    { size: sizeForKg(5) }, { size: sizeForKg(201) },
+    { habitat: 'aquatic' as const }, { habitat: 'amphibious' as const },
+    { flight: .8 }, { grasp: .2 }, { fur: .1 },
+  ]) {
+    const g = intelligent(patch);
+    assert.notEqual(describe(g).icon, '🧑');
+    assert.doesNotMatch(portrait(g, 30, 1), /M136,10 L132,120/);
+    assert.equal(g.intel, SENTIENCE);
+  }
+  assert.equal(keyFor(intelligent({ habitat:'aquatic',size:sizeForKg(1800) })), 'whale');
 });

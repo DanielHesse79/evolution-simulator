@@ -1,4 +1,4 @@
-import { SENTIENCE, isAuto, type Genome } from '../sim/genome';
+import { SENTIENCE, hasHumanoidBody, isAuto, type Genome } from '../sim/genome';
 import { RNG } from '../sim/rng';
 
 /**
@@ -406,7 +406,7 @@ function animal(g: Genome, P: Pal, rng: RNG, id: string): string {
   const amph = g.habitat === 'amphibious';
   const scene = aquatic ? waterScene(id, true, rng) : amph ? shoreScene(id, g, rng) : landScene(id, g, rng);
   let body: string;
-  if (g.intel >= SENTIENCE) body = person(g, P, rng);
+  if (g.intel >= SENTIENCE && hasHumanoidBody(g)) body = person(g, P, rng);
   else if (g.tier === 2) body = simpleAnimal(g, P, rng, aquatic);
   else if (g.tier === 3) body = aquatic ? seaArthropod(g, P, rng) : amph ? crab(g, P, rng) : bug(g, P, rng);
   else if (aquatic) body = g.fur > 0.4 ? seaMammal(g, P, rng) : fish(g, P, rng);

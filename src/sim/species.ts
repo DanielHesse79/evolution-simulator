@@ -59,6 +59,10 @@ export interface Derived {
   grazeLoss: number;
   /** Share of the population a fire kills. Low plants survive on their roots; trees burn. */
   fireLoss: number;
+  /** 0..1: how much a land animal suffers in dry country without fresh water nearby. */
+  thirst: number;
+  /** How far it will travel to drink: big bodies walk far, wings go further still. */
+  reach: number;
 }
 
 export function derive(g: Genome): Derived {
@@ -114,7 +118,23 @@ export function derive(g: Genome): Derived {
     tall: auto ? clamp((g.size - 4.2) / 2.5, 0, 1) : 0,
     grazeLoss: grazeLoss(g),
     fireLoss: fireLoss(g),
+    thirst: thirstOf(g),
+    reach: 0.45 + 0.07 * g.size + 0.6 * g.flight,
   };
+}
+
+/** Land animals need to drink; small invertebrates live off the water in their food, desert dwellers off very little. */
+function thirstOf(g: Genome): number {
+  if (isAuto(g) || g.habitat === 'aquatic' || g.tier < 3) return 0;
+  const body = g.tier === 3 ? 0.45 : g.habitat === 'amphibious' ? 0.7 : 1;
+  return body * (0.4 + 0.6 * clamp(g.moistOpt / 0.45, 0, 1));
+}
+
+/** Fitness left to a thirsty animal in a cell with this rainfall and this much fresh water nearby. */
+export function thirstFit(d: Derived, rain: number, drink: number): number {
+  if (d.thirst <= 0) return 1;
+  const dry = clamp((0.45 - rain) / 0.3, 0, 1);
+  return 1 - 0.55 * d.thirst * dry * (1 - Math.min(1, drink * d.reach));
 }
 
 /** The strongest of several options, plus a quarter of the runner-up. */
@@ -169,7 +189,12 @@ export function pairAlpha(a: Genome, b: Genome): number {
   if (a.diet === b.diet) dietOverlap = 1;
   else if (a.diet === 'omni' || b.diet === 'omni') dietOverlap = 0.55;
   else dietOverlap = 0;
-  return dietOverlap * (0.15 + 0.85 * Math.exp(-(ds * ds) / 2.88));
+  // animals that live differently share less: insects and backboned animals, flyers and walkers,
+  // climbers in the canopy and grazers on the ground
+  const plan = a.tier === b.tier ? 1 : 0.5;
+  const air = 1 - 0.5 * Math.abs(a.flight - b.flight);
+  const canopy = 1 - 0.35 * Math.abs(a.grasp - b.grasp);
+  return dietOverlap * (0.15 + 0.85 * Math.exp(-(ds * ds) / 2.88)) * plan * air * canopy;
 }
 
 /** How much of an autotroph a plant-eater can actually use (0..1). */
@@ -181,9 +206,13 @@ export function pairEdible(eater: Genome, food: Genome): number {
   if (eater.size < 1.5 && food.size > 3) e *= 0.25;
   if (ds > 4) e *= Math.exp(-((ds - 4) * (ds - 4)) / 3);
   if (food.size > 5 && food.habitat !== 'aquatic') {
-    const reach = Math.max(clamp((eater.size - 6) / 2.5, 0, 1), eater.grasp, 0.8 * eater.flight);
+    // tall browsers, climbers and flyers reach the leaves; insects crawl up the trunk and live on them
+    const insect = eater.tier === 3 && eater.habitat !== 'aquatic' ? 0.75 : 0;
+    const reach = Math.max(clamp((eater.size - 6) / 2.5, 0, 1), eater.grasp, 0.8 * eater.flight, insect);
     e *= 0.2 + 0.8 * reach;
   }
+  // a flying body cannot carry a big gut: birds and bats take seeds and fruit, not leaves
+  if (eater.tier >= 4) e *= 1 - 0.45 * eater.flight;
   return e * (1 - 0.5 * food.toxin) * (1 - 0.35 * food.armor);
 }
 
@@ -193,8 +222,10 @@ export function pairAccess(pred: Genome, dPred: Derived, prey: Genome, dPrey: De
   const ideal = 1 - 1.5 * pred.social; // packs take prey larger than themselves
   const d = pred.size - prey.size - ideal;
   const sizeMatch = Math.exp(-(d * d) / 3.38);
-  const open = sizeMatch * clamp(0.55 + 0.6 * (dPred.offOpen - dPrey.defOpen), 0.03, 1);
-  const forest = sizeMatch * clamp(0.55 + 0.6 * (dPred.offForest - dPrey.defForest), 0.03, 1);
+  // agile flyers snatch smaller animals on the wing: birds and bats live on insects
+  const hawk = prey.size < pred.size ? 0.35 * pred.flight : 0;
+  const open = sizeMatch * clamp(0.55 + 0.6 * (dPred.offOpen - dPrey.defOpen) + hawk, 0.03, 1);
+  const forest = sizeMatch * clamp(0.55 + 0.6 * (dPred.offForest - dPrey.defForest) + hawk, 0.03, 1);
   return [open, forest];
 }
 
@@ -223,7 +254,7 @@ export class Species {
   history: number[] = [];
   established = false;
   sentient = false;
-  /** Ticks of heightened mutation left (divine mutagen). */
+  /** Ticks of heightened mutation left (the mutagen power). */
   mutagen = 0;
   /** Tick of the last catastrophe that hit this species, and what it was. */
   lastHitTick = -1000;
@@ -248,9 +279,9 @@ export class Species {
   historyStart = -1;
   /** The continents it reached, in order. */
   reached: { name: string; year: number }[] = [];
-  /** Until this step the species is shielded by God: nothing eats it and rivals press it less. */
+  /** Until this step the species is sheltered by the player: nothing eats it and rivals press it less. */
   shelterUntil = -1;
-  /** Made by God in the lab or with guided evolution: never culled to make room, only by nature. */
+  /** Made by the player in the lab or with guided evolution: never culled to make room, only by nature. */
   playerMade = false;
 
   constructor(genome: Genome) {

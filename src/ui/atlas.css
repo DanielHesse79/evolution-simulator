@@ -78,6 +78,7 @@ input[type='range'] { accent-color: var(--teal); }
 .eyebrow { text-align: center; text-transform: uppercase; font-size: 9px; letter-spacing: .2em; color: var(--teal); margin-bottom: 10px; }
 .start-card h1 { font-size: 40px; font-weight: 400; letter-spacing: .16em; }
 .start-card .tag { font-size: 14px; line-height: 1.55; color: #bacac3; margin-bottom: 12px; }
+.disclaimer { font-size: 12px; line-height: 1.5; color: #d9c58f; border-left: 3px solid #b8953f; padding: 6px 10px; margin: 0 0 12px; background: rgba(184, 149, 63, 0.08); border-radius: 0 6px 6px 0; }
 .start-card .goalcard { padding: 10px 12px; }
 .start-card .goalcard .gi { font-size: 22px; }
 .start-card .btnrow { justify-content: stretch; }

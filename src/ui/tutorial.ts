@@ -18,7 +18,7 @@ interface Step {
 
 const STEPS: Step[] = [
   {
-    title: 'Welcome, Creator',
+    title: 'Welcome',
     text: 'This short tour shows you how to read your world and shape the life in it. You can end it at any time.',
   },
   {
@@ -55,7 +55,7 @@ const STEPS: Step[] = [
   {
     target: ['#detail'],
     title: 'Guided evolution',
-    text: 'Open Traits & evolution to find the ＋ and − buttons. They breed a daughter species with a changed trait. It costs divine energy, and natural selection decides whether she survives. Horns help on the open savanna but are a curse in the forest.',
+    text: 'Open Traits & evolution to find the ＋ and − buttons. They breed a daughter species with a changed trait. It costs energy, and natural selection decides whether she survives. Horns help on the open savanna but are a curse in the forest.',
   },
   {
     target: ['#atmos'],
@@ -64,8 +64,8 @@ const STEPS: Step[] = [
   },
   {
     target: ['#powers'],
-    title: 'Divine powers',
-    text: 'Pick a power and click the map: fire, rain, minerals, plague, the Ark that carries a species to another continent, volcanoes and meteors. Esc or a right-click puts it down again.',
+    title: 'Powers',
+    text: 'Pick a power and click the map: fire, rain, minerals, plague, Relocate that carries a species to another continent, volcanoes and meteors. Esc or a right-click puts it down again.',
   },
   {
     target: ['#layers'],
@@ -80,7 +80,7 @@ const STEPS: Step[] = [
   {
     target: ['#goal', '#energy'],
     title: 'Your purpose',
-    text: 'Your goal and how close you are. Every act of God costs divine energy (⚡), which returns slowly, so spend it wisely. Good luck!',
+    text: 'Your goal and how close you are. Every intervention costs energy (⚡), which returns slowly, so spend it wisely. Good luck!',
   },
 ];
 

@@ -1,6 +1,6 @@
 /**
  * Gameplay sound is synthesised with the Web Audio API. Chapter recordings are played separately.
- * There are three layers: one-shot effects for events and divine acts, an ambient bed that follows
+ * There are three layers: one-shot effects for events and the player's acts, an ambient bed that follows
  * what the map is showing (sea, wind, fire, birdsong), and a slow generative music pad.
  */
 

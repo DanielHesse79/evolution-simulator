@@ -18,7 +18,7 @@ import {
   type Genome,
   type MutEnv,
 } from './genome';
-import { D_CHEMO, D_PHOTO, Species, derive, type Diagnosis, tierBonusOf, hslToRgb, pairAccess, pairAlpha, pairEdible } from './species';
+import { D_CHEMO, D_PHOTO, Species, derive, type Diagnosis, tierBonusOf, hslToRgb, pairAccess, pairAlpha, pairEdible, thirstFit } from './species';
 
 export const MAXS = 260; // population slots (hard cap on living species)
 export const SOFT_CAP = 210; // above this, only major innovations found new species
@@ -46,9 +46,9 @@ export interface Difficulty {
   icon: string;
   blurb: string;
   startEnergy: number;
-  /** Multiplier on how fast divine energy returns. */
+  /** Multiplier on how fast the player's energy returns. */
   regen: number;
-  /** Multiplier on the price of every divine act. */
+  /** Multiplier on the price of every intervention. */
   cost: number;
   /** Multiplier on natural fires, eruptions, impacts and plagues. */
   disasters: number;
@@ -58,9 +58,9 @@ export interface Difficulty {
 }
 
 export const DIFFICULTIES: Difficulty[] = [
-  { id: 'gentle', name: 'Gentle', icon: '🌱', blurb: 'Plenty of divine energy, cheap miracles and a calm planet.', startEnergy: 100, regen: 1.8, cost: 0.6, disasters: 0.5, edenTarget: 45, dominionAnimals: 6 },
+  { id: 'gentle', name: 'Gentle', icon: '🌱', blurb: 'Plenty of energy, cheap interventions and a calm planet.', startEnergy: 100, regen: 1.8, cost: 0.6, disasters: 0.5, edenTarget: 45, dominionAnimals: 6 },
   { id: 'normal', name: 'Normal', icon: '⚖️', blurb: 'The world as it was meant to be.', startEnergy: 60, regen: 1, cost: 1, disasters: 1, edenTarget: 60, dominionAnimals: 8 },
-  { id: 'hard', name: 'Hard', icon: '🔥', blurb: 'Scarce energy, costly miracles and a restless planet full of fire, ash and plague.', startEnergy: 30, regen: 0.75, cost: 1.3, disasters: 1.6, edenTarget: 70, dominionAnimals: 10 },
+  { id: 'hard', name: 'Hard', icon: '🔥', blurb: 'Scarce energy, costly interventions and a restless planet full of fire, ash and plague.', startEnergy: 30, regen: 0.75, cost: 1.3, disasters: 1.6, edenTarget: 70, dominionAnimals: 10 },
 ];
 
 export const EDEN_TARGET = 60;
@@ -77,8 +77,8 @@ export interface GoalInfo {
 export const GOALS: GoalInfo[] = [
   { id: 'awakening', name: 'The Awakening', icon: '✨', blurb: 'Raise a species that becomes aware of its own existence within four billion years.' },
   { id: 'dominion', name: 'Dominion', icon: '👑', blurb: 'Let one animal species wipe out every other animal on the planet.' },
-  { id: 'eden', name: 'Garden of Eden', icon: '🌺', blurb: 'Nurture a world teeming with life: 45 to 70 kinds of plants and animals side by side, depending on difficulty.' },
-  { id: 'sandbox', name: 'Sandbox', icon: '🪐', blurb: 'No goal and unlimited divine power. Just play God.' },
+  { id: 'eden', name: 'Living Garden', icon: '🌺', blurb: 'Nurture a world teeming with life: 45 to 70 kinds of plants and animals side by side, depending on difficulty.' },
+  { id: 'sandbox', name: 'Sandbox', icon: '🪐', blurb: 'No goal and unlimited energy. Just experiment.' },
 ];
 
 export interface LogEvent {
@@ -216,6 +216,8 @@ export class Sim {
   private kBonus = new Float32Array(MAXS);
   private tall = new Float32Array(MAXS);
   private grazeLoss = new Float32Array(MAXS);
+  private thirst = new Float32Array(MAXS);
+  private reach = new Float32Array(MAXS);
   private dietCode = new Uint8Array(MAXS);
   private alpha = new Float32Array(MAXS * MAXS);
   private edible = new Float32Array(MAXS * MAXS);
@@ -225,13 +227,15 @@ export class Sim {
   private totCells = new Int32Array(MAXS);
   /** Food eaten this step: eater slot × food slot. Flushed into the species' records every step. */
   private eatMat = new Float64Array(MAXS * MAXS);
-  /** 1 for species under God's protection this step. */
+  /** 1 for species the player shelters this step. */
   private shelter = new Uint8Array(MAXS);
   /** Biomass lost this step to a failing growth balance: hunger, crowding, a hostile climate. */
   private hungerLoss = new Float64Array(MAXS);
   // scratch buffers for the per-cell loop
   private ps = new Int32Array(MAXS);
   private pp = new Float64Array(MAXS);
+  private hs = new Int32Array(MAXS);
+  private hp = new Float64Array(MAXS);
   private fit = new Float64Array(MAXS);
   private gain = new Float64Array(MAXS);
   private loss = new Float64Array(MAXS);
@@ -434,6 +438,8 @@ export class Sim {
     this.kBonus[s] = d.kBonus;
     this.tall[s] = d.tall;
     this.grazeLoss[s] = d.grazeLoss;
+    this.thirst[s] = d.thirst;
+    this.reach[s] = d.reach;
     this.dietCode[s] = d.dietCode;
     for (const o of this.alive) {
       const t = o.slot;
@@ -506,7 +512,8 @@ export class Sim {
     this.tick++;
     const previousYear = this.year;
     this.year = yearAt(this.tick);
-    if (this.tick % 8 === 0) this.moveContinents();
+    // the crust moves a little at a time; every 16 epochs is often enough at the game's slow drift
+    if (this.tick % 16 === 0) this.moveContinents();
     for (const sp of this.alive) this.shelter[sp.slot] = sp.shelterUntil > this.tick ? 1 : 0;
     this.updateAtmosphere(this.year - previousYear);
     if (this.climateDirty || this.tick % 4 === 0) {
@@ -608,8 +615,8 @@ export class Sim {
   /** Growth, competition, grazing, predation and local spread, cell by cell. */
   private populationStep(): void {
     const w = this.world;
-    const { cls, ti, pi, mi, canopy, cover, plankton, photoProd, chemoProd, nb, isWater } = w;
-    const { pop, tLut, pLut, mLut, hab, fitOpen, fitForest, o2f, rate, disp, effH, effC, kBonus, tall, grazeLoss, dietCode, alpha, edible, accO, accF, aliveSlots, totPop, totCells, ps, pp, fit, gain, loss, eatMat, hungerLoss } = this;
+    const { cls, ti, pi, mi, canopy, cover, plankton, photoProd, chemoProd, nb, isWater, rain, drink } = w;
+    const { pop, tLut, pLut, mLut, hab, fitOpen, fitForest, o2f, rate, disp, effH, effC, kBonus, tall, grazeLoss, dietCode, alpha, edible, accO, accF, aliveSlots, totPop, totCells, ps, pp, hs, hp, fit, gain, loss, eatMat, hungerLoss } = this;
     const nAlive = this.nAlive;
     totPop.fill(0);
     totCells.fill(0);
@@ -618,23 +625,51 @@ export class Sim {
     let chemoBio = 0;
     let heteroBio = 0;
     let rs = (this.rng.next() * 4294967296) >>> 0;
+    const seaSlow = this.seaSettled;
+    const tick = this.tick;
 
     for (let c = 0; c < N; c++) {
       const base = c * MAXS;
-      let n = 0;
+      // producers first, then eaters: each only ever competes with, eats or is eaten by the other group's
+      // members in known ways, so the loops below can skip what cannot interact
+      let nA = 0;
+      let nH = 0;
       for (let k = 0; k < nAlive; k++) {
         const s = aliveSlots[k];
         const p = pop[base + s];
-        if (p > 0) {
-          ps[n] = s;
-          pp[n] = p;
-          n++;
+        if (p <= 0) continue;
+        if (dietCode[s] <= D_PHOTO) {
+          ps[nA] = s;
+          pp[nA++] = p;
+        } else {
+          hs[nH] = s;
+          hp[nH++] = p;
         }
       }
+      for (let k = 0; k < nH; k++) {
+        ps[nA + k] = hs[k];
+        pp[nA + k] = hp[k];
+      }
+      const n = nA + nH;
       if (n === 0) {
         canopy[c] *= 0.6;
         cover[c] *= 0.6;
         plankton[c] *= 0.6;
+        continue;
+      }
+      // Once the seas have settled, a quarter of the sea cells are worked out each step, in turn. This
+      // halves the cost of a step (the sea is two thirds of the map); the others are only counted.
+      if (seaSlow && isWater[c] && ((c + tick) & 3) !== 0) {
+        for (let a = 0; a < n; a++) {
+          const s = ps[a];
+          const P = pp[a];
+          totPop[s] += P;
+          totCells[s]++;
+          const d = dietCode[s];
+          if (d === D_PHOTO) oceanPhoto += P;
+          else if (d === D_CHEMO) chemoBio += P;
+          else heteroBio += P;
+        }
         continue;
       }
       const cl = cls[c];
@@ -646,6 +681,9 @@ export class Sim {
       const Kc = KSCALE * chemoProd[c];
       const exposure = this.exposureFitness(c);
       const demeBase = demeAt(c) * MAXS;
+      // in dry country land animals must stay within reach of a river or a lake
+      const dry = isWater[c] ? 0 : clamp((0.45 - rain[c]) / 0.3, 0, 1);
+      const drinkC = drink[c];
 
       for (let a = 0; a < n; a++) {
         const s = ps[a];
@@ -654,6 +692,7 @@ export class Sim {
         const p = clamp(Math.round(pI - this.localPh[i] * 10), 0, P_LUT - 1);
         const m = mI === M_WATER ? M_WATER : clamp(Math.round(mI - this.localM[i] * 100), 0, 100);
         fit[a] = tLut[s * T_LUT + t] * pLut[s * P_LUT + p] * mLut[s * M_LUT + m] * hab[s * 4 + cl] * (fitOpen[s] + (fitForest[s] - fitOpen[s]) * cnp) * o2f[s] * exposure;
+        if (dry > 0 && this.thirst[s] > 0) fit[a] *= 1 - 0.55 * this.thirst[s] * dry * (1 - Math.min(1, drinkC * this.reach[s]));
         loss[a] = 0;
       }
 
@@ -663,7 +702,10 @@ export class Sim {
         const row = s * MAXS;
         const d = dietCode[s];
         let C = 0;
-        for (let b = 0; b < n; b++) C += alpha[row + ps[b]] * pp[b];
+        // producers only compete with producers, eaters with eaters
+        const b0 = a < nA ? 0 : nA;
+        const b1 = a < nA ? nA : n;
+        for (let b = b0; b < b1; b++) C += alpha[row + ps[b]] * pp[b];
         if (this.shelter[s]) C *= 0.45;
         let K: number;
         if (d === D_PHOTO) K = Kp;
@@ -673,9 +715,9 @@ export class Sim {
           const eC = effC[s];
           let Fp = 0;
           let Fc = 0;
-          if (eH > 0) for (let b = 0; b < n; b++) Fp += edible[row + ps[b]] * pp[b];
+          if (eH > 0) for (let b = 0; b < nA; b++) Fp += edible[row + ps[b]] * pp[b];
           if (eC > 0) {
-            for (let b = 0; b < n; b++) {
+            for (let b = nA; b < n; b++) {
               const o = accO[row + ps[b]];
               Fc += (o + (accF[row + ps[b]] - o) * cnp) * pp[b];
             }
@@ -690,7 +732,7 @@ export class Sim {
               let cons = (intake * wH) / wT;
               if (cons > 0.5 * Fp) cons = 0.5 * Fp;
               const q = cons / Fp;
-              for (let b = 0; b < n; b++) {
+              for (let b = 0; b < nA; b++) {
                 const e = edible[row + ps[b]];
                 if (e > 0) {
                   const eaten = q * e * pp[b] * grazeLoss[ps[b]];
@@ -703,7 +745,7 @@ export class Sim {
               let cons = (intake * wC) / wT;
               if (cons > 0.5 * Fc) cons = 0.5 * Fc;
               const q = cons / Fc;
-              for (let b = 0; b < n; b++) {
+              for (let b = nA; b < n; b++) {
                 const o = accO[row + ps[b]];
                 const acc = o + (accF[row + ps[b]] - o) * cnp;
                 if (acc > 0) {
@@ -1027,7 +1069,7 @@ export class Sim {
 
 /**
    * May this species be made to give way to a newcomer? Never while it is young, growing, under
-   * God's protection, made by God, or the only mind in the world.
+   * sheltered by the player, made by the player, or the only mind in the world.
    */
   private cullable(o: Species): boolean {
     if (!o.established || o.sentient || o.playerMade || o.shelterUntil > this.tick) return false;
@@ -1043,7 +1085,7 @@ export class Sim {
     const d = derive(g);
     const hf = habFactors(g)[w.cls[c]];
     if (hf <= 0) return 0;
-    const m = w.isWater[c] ? 1 : moistResponse(g, w.moist[c]);
+    const m = w.isWater[c] ? 1 : moistResponse(g, w.moist[c]) * thirstFit(d, w.rain[c], w.drink[c]);
     const body = (d.fitOpen + (d.fitForest - d.fitOpen) * w.canopy[c]) * tierBonusOf(g);
     return tempResponse(g, w.temp[c]) * phResponse(g, w.ph[c]) * m * hf * body * o2Factor(g, w.atm.o2, w.atm.co2) * this.exposureFitness(c);
   }
@@ -1201,7 +1243,7 @@ export class Sim {
     const sp = this.addSpecies(child, parent, major !== null);
     if (!sp) return null;
     if (opts.force) {
-      // a divine reshaping: part of the parent population around the chosen place is transformed
+      // the player's reshaping: part of the parent population around the chosen place is transformed
       this.forRadius(target, 3, (c) => {
         const idx = c * MAXS + parent.slot;
         const moved = this.pop[idx] * 0.4;
@@ -1249,7 +1291,7 @@ export class Sim {
       const local = this.localGenome(sp, c);
       const tF = tempResponse(local, w.temp[c]);
       const pF = phResponse(local, w.ph[c]);
-      const mF = w.isWater[c] ? 1 : moistResponse(local, w.moist[c]);
+      const mF = w.isWater[c] ? 1 : moistResponse(local, w.moist[c]) * thirstFit(sp.derived, w.rain[c], w.drink[c]);
       const oF = this.o2f[s];
       const fit = tF * pF * mF * this.hab[s * 4 + w.cls[c]] * (this.fitOpen[s] + (this.fitForest[s] - this.fitOpen[s]) * cnp) * oF;
       d.fit += P * fit;
@@ -1337,7 +1379,7 @@ export class Sim {
     const drops: [number, string][] = [
       [(base ? base.tF : 1) - now.tF, now.temp > g.tempOpt ? `the climate grew too hot for it (around ${Math.round(now.temp)} °C where it lived, against the ${Math.round(g.tempOpt)} °C it was built for)` : `the climate grew too cold for it (around ${Math.round(now.temp)} °C where it lived, against the ${Math.round(g.tempOpt)} °C it was built for)`],
       [(base ? base.pF : 1) - now.pF, now.ph < g.phOpt ? `its ${g.habitat === 'aquatic' ? 'waters' : 'soils'} turned too acidic (pH ${now.ph.toFixed(1)})` : `its ${g.habitat === 'aquatic' ? 'waters' : 'soils'} turned too alkaline (pH ${now.ph.toFixed(1)})`],
-      [(base ? base.mF : 1) - now.mF, now.moist < g.moistOpt ? 'the land dried out under it' : 'the land grew too wet for it'],
+      [(base ? base.mF : 1) - now.mF, now.moist < g.moistOpt ? (sp.derived.thirst > 0.3 ? 'the land dried out and it found too little water to drink' : 'the land dried out under it') : 'the land grew too wet for it'],
       [(base ? base.oF : 1) - now.oF, g.diet === 'chemo' && g.tier === 0 ? 'rising oxygen stressed this oxygen-sensitive lineage' : 'there was too little oxygen in the air for a body like this'],
     ];
     drops.sort((a, b) => b[0] - a[0]);
@@ -1489,7 +1531,7 @@ export class Sim {
       const cnp = w.canopy[c];
       const t1 = tempResponse(g, w.temp[c]);
       const p1 = phResponse(g, w.ph[c]);
-      const m1 = w.isWater[c] ? 1 : moistResponse(g, w.moist[c]);
+      const m1 = w.isWater[c] ? 1 : moistResponse(g, w.moist[c]) * thirstFit(d, w.rain[c], w.drink[c]);
       const o1 = o2Factor(g, w.atm.o2, w.atm.co2);
       const fit = t1 * p1 * m1 * hf[w.cls[c]] * (d.fitOpen + (d.fitForest - d.fitOpen) * cnp) * tierBonusOf(g) * o1 * this.exposureFitness(c);
       let C = 0;
@@ -1779,7 +1821,7 @@ export class Sim {
     } else if (this.goal === 'eden') {
       const n = this.alive.filter((sp) => sp.established && sp.kind !== 'microbe').length;
       if (n >= this.diff.edenTarget) {
-        this.end('won', 'Garden of Eden', `In ${yr}, ${n} kinds of plants and animals share your world: a living tapestry from pole to pole.`);
+        this.end('won', 'Living Garden', `In ${yr}, ${n} kinds of plants and animals share your world: a living tapestry from pole to pole.`);
         return;
       }
     }
@@ -2074,10 +2116,10 @@ export class Sim {
   }
 
   // -------------------------------------------------------------------------
-  // Divine interface
+  // Player interface
   // -------------------------------------------------------------------------
 
-  /** What a divine act with this base price costs at the chosen difficulty. */
+  /** What an intervention with this base price costs at the chosen difficulty. */
   price(base: number): number {
     return Math.round(base * this.diff.cost);
   }
@@ -2111,7 +2153,7 @@ export class Sim {
     return 50 * this.diff.cost * Math.abs(Sim.atmNorm(key, value) - Sim.atmNorm(key, this.world.atm[key]));
   }
 
-  /** God sets a property of the air, the sun or the sea. Costs energy in proportion to the change. */
+  /** The player sets a property of the air, the sun or the sea. Costs energy in proportion to the change. */
   setAtmosphere(key: AtmKey, value: number): { ok: boolean; value: number } {
     const a = this.world.atm;
     const r = ATM_RANGE[key];

@@ -33,6 +33,9 @@ class App implements Game {
   private last = 0;
   private dirty = true;
   private lastBase = 0;
+  /** When the map was last drawn, and when the player last touched mouse or keyboard. */
+  private lastDraw = 0;
+  private lastInput = 0;
   private hover = -1;
   private endShown = false;
   private lastTooltip = 0;
@@ -55,6 +58,9 @@ class App implements Game {
     const unlock = () => this.sound.unlock();
     window.addEventListener('pointerdown', unlock, { capture: true });
     window.addEventListener('keydown', unlock, { capture: true });
+    // any input wakes the map up to full frame rate for a moment
+    const touched = () => { this.lastInput = performance.now(); };
+    for (const ev of ['pointermove', 'pointerdown', 'wheel', 'keydown']) window.addEventListener(ev, touched, { capture: true, passive: true });
     const modes: SoundMode[] = ['all', 'effects', 'off'];
     const label = () => {
       const b = $('btn-sound');
@@ -468,6 +474,15 @@ class App implements Game {
         if (steps) this.dirty = true;
       }
       this.chapters.update(now);
+      // Drawing is the main cost when the world stands still: at most 30 frames a second, and only
+      // four a second while it is paused and nobody is touching it.
+      const calm = (this.paused || !active) && now - this.lastInput > 1500 && !this.renderer.moving;
+      if (now - this.lastDraw < (calm ? 250 : 1000 / 30)) {
+        this.tutorial.update(now);
+        requestAnimationFrame((t) => this.frame(t));
+        return;
+      }
+      this.lastDraw = now;
       if (this.dirty && now - this.lastBase > 150) {
         this.renderer.renderBase();
         this.lastBase = now;

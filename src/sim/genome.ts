@@ -155,6 +155,8 @@ export function traitCap(g: Genome, k: TraitKey): number {
 export function sanitize(g: Genome): void {
   g.tier = clamp(Math.round(g.tier), 0, 4);
   g.size = clamp(g.size, minSize(g), MAX_SIZE[g.tier]);
+  // breathing through tubes keeps land invertebrates small (about 40 g at most)
+  if (g.tier === 3 && g.habitat !== 'aquatic' && !isAuto(g)) g.size = Math.min(g.size, 6);
   g.tempOpt = clamp(g.tempOpt, -25, 70);
   g.tempTol = clamp(g.tempTol, 3, 16);
   g.phOpt = clamp(g.phOpt, 2, 11);
@@ -257,7 +259,8 @@ function proposeDiet(g: Genome, env: MutEnv, rng: RNG): Diet | null {
       break;
     case 'herb':
       if (env.hasPrey) {
-        opts.push(['omni', 1]);
+        // flyers catch insects on the wing
+        opts.push(['omni', g.flight > 0.4 ? 3 : 1]);
         opts.push(['carn', env.hasCarn ? 0.4 : 2.5]);
       }
       break;

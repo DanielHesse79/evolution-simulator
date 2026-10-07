@@ -25,7 +25,7 @@ export const POWERS: PowerInfo[] = [
   { id: 'alkali', name: 'Alkalize', icon: '🧂', cost: 6, radius: 4, hint: 'Make soil or water more alkaline.' },
   { id: 'mutagen', name: 'Mutagen', icon: '☢️', cost: 18, radius: 5, hint: 'Scramble the genes of everything nearby. New forms arise much faster for a while.' },
   { id: 'plague', name: 'Plague', icon: '🦠', cost: 25, radius: 2, hint: 'Unleash a virus on the selected species (or on whatever is most common here). It spreads from host to host.' },
-  { id: 'transplant', name: 'Ark', icon: '🕊️', cost: 20, radius: 1, hint: 'Carry a founding population of the selected species to a new shore.', needsSpecies: true },
+  { id: 'transplant', name: 'Relocate', icon: '🛶', cost: 20, radius: 1, hint: 'Carry a founding population of the selected species to a new shore.', needsSpecies: true },
   { id: 'volcano', name: 'Volcano', icon: '🌋', cost: 30, radius: 4, hint: 'Split the earth. Kills nearby life, darkens the sky, but leaves rich soil.' },
   { id: 'meteor', name: 'Meteor', icon: '☄️', cost: 55, radius: 7, hint: 'Hurl a mountain from the sky. Devastation, fire and a long winter.' },
 ];
@@ -39,12 +39,12 @@ export interface PowerResult {
 
 const fail = (msg: string): PowerResult => ({ ok: false, msg });
 
-/** Use a divine power on a map cell. Energy is only spent when the act succeeds. */
+/** Use a power on a map cell. Energy is only spent when the act succeeds. */
 export function usePower(sim: Sim, id: PowerId, cell: number, selected: Species | null): PowerResult {
   const info = POWERS.find((p) => p.id === id)!;
   const w = sim.world;
   if (id === 'inspect') return { ok: true, msg: '' };
-  if (!sim.canAfford(info.cost)) return fail(`Not enough divine energy (${sim.price(info.cost)} needed).`);
+  if (!sim.canAfford(info.cost)) return fail(`Not enough energy (${sim.price(info.cost)} needed).`);
   const where = w.isWater[cell] ? 'the sea' : w.continentName(cell);
 
   switch (id) {
@@ -162,7 +162,7 @@ export function canGuide(sp: Species, key: GuideKey, dir: 1 | -1): boolean {
 }
 
 /**
- * Guided evolution: God nudges one trait, and a daughter species with the change is born
+ * Guided evolution: the player nudges one trait, and a daughter species with the change is born
  * where the parent is most numerous. Whether she survives is up to natural selection.
  */
 export function guideEvolution(sim: Sim, sp: Species, key: GuideKey, dir: 1 | -1): PowerResult {
@@ -171,7 +171,7 @@ export function guideEvolution(sim: Sim, sp: Species, key: GuideKey, dir: 1 | -1
     return fail('A mind cannot grow alone. Give this creature grasping limbs and a social life first.');
   }
   if (!canGuide(sp, key, dir)) return fail(key === 'size' ? 'This body plan cannot change size any further.' : `This body plan cannot ${dir > 0 ? 'develop' : 'reduce'} ${traitInfo(sp.genome, key).label.toLowerCase()} any further.`);
-  if (!sim.canAfford(GUIDE_COST)) return fail(`Not enough divine energy (${sim.price(GUIDE_COST)} needed).`);
+  if (!sim.canAfford(GUIDE_COST)) return fail(`Not enough energy (${sim.price(GUIDE_COST)} needed).`);
   const cell = sim.densestCell(sp);
   if (cell < 0) return fail('The species is too scattered.');
   const child = sim.trySpeciate(sp, {

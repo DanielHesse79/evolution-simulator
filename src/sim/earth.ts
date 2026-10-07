@@ -10,6 +10,12 @@ export function meanCycle(start: number, end: number, period: number): number {
   return end > start ? (Math.cos(k * start) - Math.cos(k * end)) / (k * (end - start)) : Math.sin(k * start);
 }
 
+/**
+ * Plates drift at this fraction of their real speed. A gameplay choice: at full speed the continents
+ * would circle the map several times in one game, faster than life can be followed or helped along.
+ */
+export const DRIFT = 0.3;
+
 export interface Plate { x: number; y: number; dx: number; dy: number; vx: number; vy: number; speed: number }
 
 /** Rigid translating crust patches on a cylindrical map, not a mantle convection solver. */
@@ -55,10 +61,11 @@ export class Tectonics {
     const shifts = this.plates.map(p => {
       const oldY = p.dy;
       // A planar projection cannot continue through a pole; reflect the patch there.
-      if (p.y + p.dy + p.vy * years < 0 || p.y + p.dy + p.vy * years >= this.height) p.vy *= -1;
-      p.dx = wrap(p.dx + p.vx * years, this.width);
-      p.dy += p.vy * years;
-      return { dx: p.vx * years, dy: p.dy - oldY };
+      const vx = p.vx * DRIFT, vy = p.vy * DRIFT;
+      if (p.y + p.dy + vy * years < 0 || p.y + p.dy + vy * years >= this.height) p.vy *= -1;
+      p.dx = wrap(p.dx + vx * years, this.width);
+      p.dy += p.vy * DRIFT * years;
+      return { dx: vx * years, dy: p.dy - oldY };
     });
     for (let c = 0; c < elevation.length; c++) {
       const x = c % this.width, y = Math.floor(c / this.width);

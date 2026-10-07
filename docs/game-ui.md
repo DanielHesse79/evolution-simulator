@@ -1,7 +1,7 @@
 # Game interface
 
 The layout gives the player a stable overview while revealing detailed controls when needed.
-Time, playback, energy and the current purpose stay together above the map. Divine powers sit
+Time, playback, energy and the current purpose stay together above the map. Powers sit
 on the left, living species and the selected creature on the right. World overview is open by
 default; atmosphere sliders, detailed map layers, library tools and genome controls open on demand.
 

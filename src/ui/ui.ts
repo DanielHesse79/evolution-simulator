@@ -53,6 +53,9 @@ const ATM_UI: { key: AtmKey; label: string; fmt: (v: number) => string; hint: st
   { key: 'seaLevel', label: 'Sea level', fmt: (v) => `${v >= 0 ? '+' : ''}${Math.round(v * 1000)} m`, hint: 'Drown the coasts, or lower the seas to open land bridges between continents.' },
 ];
 
+/** Shown on the start and help screens: the game is public, and its biology is not to be learned from. */
+const DISCLAIMER = 'This is a game, made for fun. It is not a teaching resource on evolution or biology: much of it is simplified or invented, and it must not be used for teaching or as a reference.';
+
 const SPEEDS = ['⏸', '▶', '▶▶', '▶▶▶'];
 const SPEED_TITLES = ['Pause (space)', 'Slow (1)', 'Fast (2)', 'Very fast (3)'];
 
@@ -127,7 +130,7 @@ export class UI {
       input.addEventListener('change', () => {
         const v = Sim.atmFromNorm(a.key, Number(input.value) / 1000);
         const res = g.sim.setAtmosphere(a.key, v);
-        if (!res.ok) this.toast('Not enough divine energy.', true);
+        if (!res.ok) this.toast('Not enough energy.', true);
         else if (Math.abs(res.value - v) > Math.abs(v) * 0.02 + 0.02) this.toast('Your energy ran out before the change was complete.', true);
         this.dragging = null;
         g.markDirty();
@@ -288,8 +291,8 @@ export class UI {
       .querySelectorAll<HTMLElement>('[data-speed]')
       .forEach((b) => b.classList.toggle('on', Number(b.dataset.speed) === (g.paused ? 0 : g.speed)));
     $('energy').innerHTML = sim.sandbox
-      ? `<div class="lbl"><span>⚡ Divine energy</span><b>∞</b></div><div class="meter"><div style="width:100%"></div></div>`
-      : `<div class="lbl"><span>⚡ Divine energy</span><b>${Math.floor(sim.energy)}</b></div><div class="meter"><div style="width:${(sim.energy / MAX_ENERGY) * 100}%"></div></div>`;
+      ? `<div class="lbl"><span>⚡ Energy</span><b>∞</b></div><div class="meter"><div style="width:100%"></div></div>`
+      : `<div class="lbl"><span>⚡ Energy</span><b>${Math.floor(sim.energy)}</b></div><div class="meter"><div style="width:${(sim.energy / MAX_ENERGY) * 100}%"></div></div>`;
     const goal = GOALS.find((x) => x.id === sim.goal)!;
     const prog = sim.goalProgress();
     $('goal').innerHTML = `<div class="lbl"><span>${goal.icon} ${goal.name}${sim.sandbox ? '' : ` · ${sim.diff.name}`}</span><span>${prog.label}</span></div><div class="meter"><div style="width:${prog.value * 100}%"></div></div>`;
@@ -534,7 +537,7 @@ export class UI {
         ${sp.alive ? `<button data-act="follow" class="${g.followId === sp.id ? 'on' : ''}" title="Keep the camera on it as it moves (drag the map to stop)">🎥 ${g.followId === sp.id ? 'Following' : 'Follow'}</button>` : ''}
         <button data-act="stats" title="How it spread, what killed it, what ate it and what it ate">📊 Stats</button>
         <button data-act="cell" title="See how its cells are built">🔬 Cell</button>
-        ${sp.alive ? `<button data-act="where" title="Rank every region by how well it would do there">🧭 Where to?</button><button data-act="lab" title="Design a mutant, see how it would fare, choose where it starts">🧪 Lab</button><button data-act="plague" title="Unleash a virus where it is most numerous (${sim.price(25)}⚡)">🦠 Plague</button><button data-act="ark" title="Carry a founding population elsewhere (${sim.price(20)}⚡)">🕊️ Ark</button>` : ''}
+        ${sp.alive ? `<button data-act="where" title="Rank every region by how well it would do there">🧭 Where to?</button><button data-act="lab" title="Design a mutant, see how it would fare, choose where it starts">🧪 Lab</button><button data-act="plague" title="Unleash a virus where it is most numerous (${sim.price(25)}⚡)">🦠 Plague</button><button data-act="ark" title="Carry a founding population elsewhere (${sim.price(20)}⚡)">🛶 Relocate</button>` : ''}
       </div>`);
   }
 
@@ -699,8 +702,9 @@ export class UI {
         <div class="eyebrow">A natural history, written by you</div>
         <h1>Evolution</h1>
         <p class="tag">A young world, a warm sea, and one kind of microbe clinging to the vents.<br>
-        You are God. You have four billion years. Shape the air, the rain and the rock, send fire and plague,
+        You have four billion years. Shape the air, the rain and the rock, send fire and plague,
         carry creatures across oceans, and see what life makes of it.</p>
+        <p class="disclaimer">${DISCLAIMER}</p>
         <h3>Choose your purpose</h3>
         <div class="goals">${GOALS.map((x) => `<button class="goalcard${x.id === goal ? ' on' : ''}" data-goal="${x.id}"><span class="gi">${x.icon}</span><div><b>${x.name}</b><span>${x.blurb}</span></div></button>`).join('')}</div>
         <label class="tutrow"><input type="checkbox" id="tut" ${tutorialSeen() ? '' : 'checked'} /> Show me around first (a short guided tour)</label>
@@ -710,7 +714,7 @@ export class UI {
         <div class="seedrow"><label for="seed">World seed</label><input id="seed" value="${1 + Math.floor(Math.random() * 999999)}" inputmode="numeric" /><button id="reroll" title="Another random world">🎲</button></div>
         <div class="btnrow">
           ${hasWorld ? '<button class="secondary" id="cancel">Back to my world</button>' : ''}
-          <button class="primary" id="begin">Let there be life</button>
+          <button class="primary" id="begin">Begin a new world</button>
         </div>
         </div>
       </div>`,
@@ -779,13 +783,15 @@ export class UI {
   showHelp(): void {
     const m = this.openModal(
       `<div class="card help">
-        <h1 style="font-size:24px">How to play God</h1>
+        <h1 style="font-size:24px">How to play</h1>
+        <p class="disclaimer">${DISCLAIMER}</p>
         <p>Life begins as a single microbe in the deep sea. Left alone it will mutate, split into new species and spread wherever it can make a living. Your job is to shape the world it adapts to.</p>
         <h3>How evolution works here</h3>
         <ul>
           <li><b>Every species has a home.</b> Temperature, rainfall, acidity and minerals decide where it thrives. Use the map layers to see them.</li>
           <li><b>Oxygen is the great gatekeeper.</b> Sunlight-eaters fill the air with it. Complex cells, bodies, land life and big animals each need more. Land plants make the most.</li>
           <li><b>Landscape shapes bodies.</b> Horns and speed pay off on open savanna but are a curse in dense forest; climbers rule the canopy. Rain makes forest, drought and fire make grassland.</li>
+          <li><b>Water is life.</b> Rain runs into rivers and lakes. In dry country animals must stay near them to drink, and their banks stay green.</li>
           <li><b>Eat and be eaten.</b> Grazers need plants, hunters need prey. Remove one and the others follow. Creatures that never met a predator have no defences.</li>
           <li><b>Minds are expensive.</b> Intelligence only pays for social animals with grasping hands. That is the road to self-awareness.</li>
         </ul>
@@ -794,10 +800,10 @@ export class UI {
           <li><b>Air, Sun &amp; Sea:</b> drag a slider to set it. The living world keeps pulling the air back towards its own balance (the small arrows show which way).</li>
           <li><b>Deep time:</b> four billion years, with short ecological episodes sampled between geological updates. Fires and infections illustrate events within an epoch; they do not last millions of years.</li>
           <li><b>A changing world:</b> plates carry continents, glaciers lower sea levels, and carbon moves between air, ocean, buried organic matter and rock. The Radiation, UV and Tectonics layers reveal local conditions.</li>
-          <li><b>Evolution:</b> mutations are undirected. Local variants, gene flow and selection change populations. Infections favour existing resistance; only retroviral episodes can occasionally contribute inherited insertions.</li>
+          <li><b>Evolution:</b> mutations are random, nudged towards the local climate as a game shortcut for the generations it does not simulate. Local variants, gene flow and selection change populations. Infections favour existing resistance; only retroviral episodes can occasionally contribute inherited insertions.</li>
           <li><b>Model limits:</b> an exploratory game, not an Earth reconstruction. Plate motion, carbon units, species boundaries and the Mind goal are simplified. Radiation is a relative exposure index, not a dose measurement.</li>
-          <li><b>Divine powers:</b> pick one, then click the map. Fire, rain and drought, minerals, acid, volcanoes, meteors, plagues and mutagens.</li>
-          <li><b>The Ark:</b> select a species, choose Ark, click another continent. Newcomers can be devastating to creatures that evolved without them.</li>
+          <li><b>Powers:</b> pick one, then click the map. Fire, rain and drought, minerals, acid, volcanoes, meteors, plagues and mutagens.</li>
+          <li><b>Relocate:</b> select a species, choose Relocate, click another continent. Newcomers can be devastating to creatures that evolved without them.</li>
           <li><b>Guided evolution:</b> select a species, open <b>Traits &amp; evolution</b>, and press ＋ or − on a trait. A daughter species with that change is born. Whether she survives is up to the world you made.</li>
         </ul>
         <h3>Looking closer</h3>
@@ -811,7 +817,7 @@ export class UI {
           <li><b>Overview:</b> find a species by name or description, or filter to <b>✦ Mine</b>. Chronicle can show all events, turning points or your creations; expand it to read more or hide it to give the map more room. Reading older events keeps your place; <b>Latest</b> returns to new arrivals.</li>
           <li><b>Chapters (🎬)</b> pauses the world for your narrated turning points. Replay unlocked scenes, preview the other recordings, or disable automatic breaks. Escape skips a scene. The player's speed, camera and pause setting are preserved.</li>
         </ul>
-        <p>Everything costs <b>divine energy</b>, which returns slowly. The clock tracks geological epochs; short ecological episodes are sampled within them. <b>Space</b> pauses, <b>1</b> selects slow playback, <b>2–3</b> speed it up, <b>Esc</b> puts your powers down.</p>
+        <p>Everything costs <b>energy</b>, which returns slowly. The clock tracks geological epochs; short ecological episodes are sampled within them. <b>Space</b> pauses, <b>1</b> selects slow playback, <b>2–3</b> speed it up, <b>Esc</b> puts your powers down.</p>
         <div class="btnrow"><button class="secondary" id="cells">🔬 Cells compared</button><button class="secondary" id="tour">🧭 Guided tour</button><button class="primary" id="ok">Back to the world</button></div>
       </div>`,
       true,
@@ -1183,7 +1189,7 @@ export class UI {
     m.querySelector('#close')!.addEventListener('click', () => this.forceClose());
     m.querySelector('#lab-go')!.addEventListener('click', () => {
       const price = cost();
-      if (!sim.sandbox && sim.energy < price) return this.toast('Not enough divine energy.', true);
+      if (!sim.sandbox && sim.energy < price) return this.toast('Not enough energy.', true);
       const r = sim.regions[release];
       const fc = sim.forecast(draft, r.cells, null, 10, cache);
       const cell = fc.bestCell >= 0 ? fc.bestCell : r.cells.find((c) => habFactors(draft)[sim.world.cls[c]] > 0.02) ?? -1;

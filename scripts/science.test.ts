@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CarbonCycle, meanCycle, Tectonics } from '../src/sim/earth';
+import { CarbonCycle, DRIFT, meanCycle, Tectonics } from '../src/sim/earth';
 import { mutate, type MutEnv } from '../src/sim/genome';
 import { RNG } from '../src/sim/rng';
 import { Sim, MAXS, TOTAL_TICKS, yearAt } from '../src/sim/simulation';
@@ -39,7 +39,7 @@ test('mutation proposals lean towards the local climate, but stay variable', () 
   assert.ok(spread.size > 5, 'proposals are not all identical');
 });
 
-test('plates preserve stationary terrain, move reproducibly at centimetres per year, and make boundaries', () => {
+test('plates preserve stationary terrain, move reproducibly at a fixed share of centimetres per year, and make boundaries', () => {
   const w = new World(12345), original = w.elev.slice();
   const a = new Tectonics(W, H, original, 12345), b = new Tectonics(W, H, original, 12345);
   const ea = original.slice(), eb = original.slice();
@@ -51,7 +51,7 @@ test('plates preserve stationary terrain, move reproducibly at centimetres per y
   assert.ok(ea.some((v, c) => Math.abs(v - original[c]) > 0.01));
   for (let i = 0; i < shifts.length; i++) {
     const km = Math.hypot(shifts[i].dx * 40075 / W, shifts[i].dy * 20004 / H);
-    near(km, a.plates[i].speed * 10, 1e-6);
+    near(km, a.plates[i].speed * 10 * DRIFT, 1e-6);
   }
   assert.ok(a.activity.some(v => v > 0.7));
   assert.ok(a.activity.some(v => v < 0.1));

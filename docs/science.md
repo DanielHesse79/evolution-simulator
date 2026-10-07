@@ -1,5 +1,9 @@
 # Scientific model and its limits
 
+**This is a game, made for fun. It is not a teaching resource on evolution or biology: much of it is
+simplified or invented, and it must not be used for teaching or as a reference.** This page records
+how the game's model works and where it departs from science, for players and developers.
+
 This is an exploratory evolution game. Its mechanisms are inspired by science, but the rates,
 trait scales and milestones are not fitted to Earth's history. A successful run does not predict
 when multicellularity, land life or intelligence would evolve. Intelligence is a game trait;
@@ -16,7 +20,7 @@ second (previously four), so the nominal four-billion-year span takes 100 minute
 pauses and chapter breaks. Faster playback still targets 12 and 40 epochs per second, subject
 to machine performance. This slows plate movement and all other processes together on screen;
 it does not change displacement per geological year or evolution per epoch. Geology is applied
-every eight epochs, so changes in coastlines remain discrete.
+every sixteen epochs, so changes in coastlines remain discrete.
 
 Population growth, dispersal, fires and infections are representative ecological episodes sampled
 within these epochs. Their durations are measured in episode steps, not geological years. We do
@@ -26,8 +30,10 @@ and evolutionary event probabilities remain game parameters, not measured rates 
 
 ## Moving geography and climate
 
-Twelve seeded crust patches move at 1–7 cm/year. The map uses an Earth-sized circumference to
-convert velocity to grid displacement. Each patch retains its original relief and rock properties;
+Twelve seeded crust patches are given real-world speeds of 1–7 cm/year, but drift at 30 % of that
+(`DRIFT` in `src/sim/earth.ts`). At full speed the continents would circle the map several times in one
+game, faster than players can follow or help life along; this is a gameplay choice. The map uses an
+Earth-sized circumference to convert velocity to grid displacement. Each patch retains its original relief and rock properties;
 overlapping continental patches gain elevation and gaps become ocean floor. Land populations and
 their regional variants are carried with moving crust, conserving biomass during this remapping.
 Subsequent ecological episodes determine whether displaced populations survive.
@@ -45,6 +51,21 @@ setting. Orbital oscillations with 23,000-, 41,000- and 100,000-year periods are
 over each geological update. Most short orbital variation therefore cancels at this resolution;
 we do not invent slow ice-age oscillations by undersampling it. There is no seasonal climate,
 ocean circulation, evolving stellar luminosity or resolved individual glacial cycle.
+
+## Rivers and lakes
+
+Rain that is not used where it falls runs downhill. Every land cell drains to its lowest neighbour;
+basins are first filled to their outlet (a priority flood), so all water reaches the sea or the polar
+edge. Water gathered from enough land becomes a river; where a filled basin collects enough of it, a
+lake. Frozen ground holds its water; dry, hot land along the way takes some of it. River banks and lake
+shores are moister than the land around them, so gallery forests and oases can grow in dry country.
+Rivers are rebuilt whenever the coastline or the rain changes; they are not eroded or carved.
+
+Land animals with backbones need to drink. In dry country (rainfall below about 45 %) they lose fitness
+unless a river or lake is within reach: big bodies range further, flyers further still. Amphibians need
+a little less, small invertebrates (which get water from their food) and desert dwellers much less.
+In a dry landscape animals therefore gather along the rivers and round the lakes. The thresholds are
+game parameters.
 
 ## Carbon and oxygen
 
@@ -84,9 +105,18 @@ survival during infection. Gene flow is approximate patch mixing, not individual
 population-genetic model; there are no explicit chromosomes, recombination or reproductive isolation.
 The portrait and genome panel show a lineage's reference body plan, not every regional variant.
 
+Animals compete with one another most when they live the same way: the same diet and body size, and
+also the same body plan (insects against animals with backbones), flight and climbing. Different ways of
+life share a place more easily, which lets food webs of many species persist side by side. Land
+invertebrates stay small (about 40 g at most). Insects climb trees and eat their leaves, so forests feed
+insects; flying animals with backbones can take seeds and fruit but not much foliage, and catch smaller
+animals on the wing, so birds and bats tend to live on insects. A predator's carrying capacity follows the
+prey in its cell, so hunters multiply where prey is plentiful and dwindle with it.
+
 Once animals with backbones exist and twelve land animal species are established, the seas settle:
 marine animals and microbes live on but no longer branch into new species (marine plants, which make
-much of the oxygen, keep evolving). This keeps the game focused on the land; it is not a biological claim. Shared niche and total
+much of the oxygen, keep evolving). From then on each sea cell is also updated only every fourth step, in
+turn, to save computing time, so life in the sea changes more slowly than on land. This keeps the game focused on the land; it is not a biological claim. Shared niche and total
 species limits remain for performance and gameplay; they are not biological laws. Complexity tiers,
 oxygen thresholds, taxonomic labels, the restriction of chemical-feeding organisms to small body
 plans, and guaranteed model advantages of some body plans are still deliberate simplifications.

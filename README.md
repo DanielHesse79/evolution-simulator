@@ -1,8 +1,11 @@
 # Evolution Simulator
 
-A god game about evolution. A procedurally generated world starts with a single kind of microbe at
-the deep-sea vents; over four billion years it mutates, speciates and spreads. You are God: you shape the
-air, the climate and the land, and life adapts to whatever you make.
+A game about evolution. A procedurally generated world starts with a single kind of microbe at
+the deep-sea vents; over four billion years it mutates, speciates and spreads. You shape the air, the
+climate and the land, and life adapts to whatever you make.
+
+> **This is a game, made for fun.** It is not a teaching resource on evolution or biology: much of it
+> is simplified or invented, and it must not be used for teaching or as a reference.
 
 ## Run it
 
@@ -15,14 +18,14 @@ Then open http://localhost:5173. `npm run build` produces a static site in `dist
 
 ## Playing
 
-- **Difficulty**: Gentle, Normal or Hard set your starting divine energy, how fast it returns,
-  the price of every miracle, how often the planet itself strikes with fire, eruptions, impacts and
+- **Difficulty**: Gentle, Normal or Hard set your starting energy, how fast it returns,
+  the price of every intervention, how often the planet itself strikes with fire, eruptions, impacts and
   plague, and how demanding the Eden and Dominion goals are.
 - **Goals**: raise a self-aware species (*The Awakening*), let one animal exterminate all others
-  (*Dominion*), grow a rich biosphere (*Garden of Eden*), or just play in the *Sandbox*.
+  (*Dominion*), grow a rich biosphere (*Living Garden*), or just play in the *Sandbox*.
 - **Air, Sun & Sea**: sliders for solar output, CO₂, oxygen, methane, sulfur haze and sea level. The
   biosphere pulls the gases back towards its own balance, so lasting change means changing life itself.
-- **Divine powers**: wildfire, rain, drought, minerals, acid/alkali, mutagen, plague, the Ark (move a
+- **Powers**: wildfire, rain, drought, minerals, acid/alkali, mutagen, plague, Relocate (move a
   species to another continent), volcano and meteor. Pick one, then click the map.
 - **Guided evolution**: select a species, open **Traits & evolution**, and press ＋/− on a trait to breed a daughter species.
   Natural selection decides whether she survives.
@@ -39,6 +42,9 @@ Then open http://localhost:5173. `npm run build` produces a static site in `dist
   several changes (traits, preferred warmth and rain), compare it with its parent region by region,
   choose where to release it and shelter it while it settles. Mutants you make are never culled to
   make room for others. **🎥 Follow** keeps the camera on a species.
+- **Rivers and lakes**: rain runs downhill into rivers and fills basins into lakes, drawn on the map.
+  River banks stay green in dry country, and land animals there must stay within reach of fresh
+  water, so herds gather along the rivers and round the lakes.
 - **Plant traits**: Height, Roots (Holdfast in the sea), Thorns & bark, Toxins, Frost hardiness and
   Seeds. Species slowly adapt towards the climate at the edge of their range, so forests spread
   from the poles to the tropics.
@@ -106,7 +112,7 @@ Run `npm test` for model regression checks and `npm run science:survey` for thre
 | `src/sim/species.ts` | Derived stats and species interactions |
 | `src/sim/simulation.ts` | The step loop: populations, speciation, atmosphere, disasters, goals |
 | `src/sim/regions.ts` | Named regions of land and sea |
-| `src/sim/powers.ts` | The player's divine powers |
+| `src/sim/powers.ts` | The player's powers |
 | `src/ui/renderer.ts` | Map painting, zoom/pan and the close-up landscape |
 | `src/ui/cell.ts` | Generated cell drawings and cell-type descriptions |
 | `src/ui/portrait.ts` | Generated portraits of every species |

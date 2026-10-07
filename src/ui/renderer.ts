@@ -169,6 +169,10 @@ export class MapRenderer {
   cx = W / 2;
   cy = H / 2;
   private target: { zoom: number; cx: number; cy: number } | null = null;
+  /** True while the view glides towards a new place. */
+  get moving(): boolean {
+    return this.target !== null;
+  }
   private base: HTMLCanvasElement;
   private mctx: CanvasRenderingContext2D;
 
@@ -194,6 +198,10 @@ export class MapRenderer {
   /** Region borders as segments [x1, y1, x2, y2, regionA, regionB] in cell units. */
   private borders: number[] = [];
   private cachedGeo = -1;
+  /** Rivers by width class and lakes, as paths in cell units; rebuilt when the water moves. */
+  private rivers: { width: number; path: Path2D }[] = [];
+  private lakes = new Path2D();
+  private riverKey = '';
 
   constructor(
     private map: HTMLCanvasElement,
@@ -721,6 +729,7 @@ export class MapRenderer {
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
+    if (this.layer === 'terrain' || this.layer === 'moist') this.drawWater(ctx, k, ky, x0, y0, dpr);
     if (detail > 0) this.drawDetail(ctx, now, x0, y0, vw, vh, k, ky, detail, st.selected);
     this.drawVolcanoes(ctx, now, sx, sy, k, dpr, cw, ch);
 
@@ -1027,7 +1036,8 @@ export class MapRenderer {
           continue;
         }
 
-        // land
+        // land; a lake keeps its open water
+        if (w.lake[c]) continue;
         if (w.burning[c]) {
           for (let i = 0; i < 2; i++) {
             const u = 0.25 + 0.5 * hash(c, i + 80);
@@ -1141,9 +1151,20 @@ export class MapRenderer {
           const pace = 0.25 + 0.7 * g.speed + 0.5 * g.flight;
           for (let j = 0; j < count; j++) {
             const ph = hash(c, sp.id * 11 + j) * 6.28;
-            const u = 0.15 + 0.7 * hash(c, sp.id * 13 + j + 3) + Math.sin(t * pace * 0.6 + ph) * 0.12;
+            let u = 0.15 + 0.7 * hash(c, sp.id * 13 + j + 3) + Math.sin(t * pace * 0.6 + ph) * 0.12;
             let v = 0.15 + 0.7 * hash(c, sp.id * 17 + j + 5) + Math.cos(t * pace * 0.45 + ph * 1.3) * 0.08;
             if (g.flight > 0.4) v -= 0.12 + Math.sin(t * 3 + ph) * 0.04;
+            else if (g.habitat !== 'aquatic' && (w.lake[c] || (w.river[c] > 0 && w.rain[c] < 0.45))) {
+              // in dry country they gather on the bank to drink: round a lake, along a river
+              if (w.lake[c]) {
+                const a = ph + Math.sin(t * pace * 0.2 + ph) * 0.4;
+                u = 0.5 + Math.cos(a) * 0.78;
+                v = 0.5 + Math.sin(a) * 0.78;
+              } else {
+                u = 0.5 + (u - 0.5) * 0.5;
+                v = 0.6 + (v - 0.5) * 0.35;
+              }
+            }
             const water = wet(x + u, y + v);
             if (g.habitat === 'aquatic' && !water) continue;
             if (g.habitat === 'terrestrial' && water && g.flight <= 0.4) continue;
@@ -1171,6 +1192,111 @@ export class MapRenderer {
       drawSprite(ctx, icon, px, py, s, flip);
     }
     ctx.globalAlpha = 1;
+  }
+
+  /** Trace every river from its source to the sea, and every lake, once per change of the water. */
+  private buildWater(): void {
+    const w = this.sim.world;
+    const key = `${w.hydroVersion}:${w.geoVersion}:${Math.floor(this.sim.tick / 20)}`;
+    if (key === this.riverKey) return;
+    this.riverKey = key;
+    const classes = [0.12, 0.17, 0.24, 0.32];
+    const paths = classes.map(() => new Path2D());
+    // where each river cell's water comes from, so the course can be drawn as one smooth curve
+    const fed = new Uint8Array(N);
+    for (let c = 0; c < N; c++) if (w.river[c] > 0 && w.down[c] >= 0) fed[w.down[c]] = 1;
+    // a cell's centre, nudged a little so rivers meander instead of running along the grid
+    const px = (c: number) => (c % W) + 0.5 + (hash(c, 501) - 0.5) * 0.45;
+    const py = (c: number) => Math.floor(c / W) + 0.5 + (hash(c, 502) - 0.5) * 0.45;
+    const near = (x: number, ref: number) => (x - ref > W / 2 ? x - W : ref - x > W / 2 ? x + W : x);
+    for (let c = 0; c < N; c++) {
+      const r = w.river[c];
+      const d = w.down[c];
+      if (r <= 0 || d < 0) continue;
+      const x1 = px(c), y1 = py(c);
+      // it ends at the shore: half-way into a sea cell, or at the middle of the next stretch
+      const sea = w.isWater[d] === 1;
+      const x2 = near(sea ? (d % W) + 0.5 : px(d), x1), y2 = sea ? Math.floor(d / W) + 0.5 : py(d);
+      const ex = x1 + (x2 - x1) * (sea ? 0.6 : 0.5), ey = y1 + (y2 - y1) * (sea ? 0.6 : 0.5);
+      const p = paths[r < 0.3 ? 0 : r < 0.5 ? 1 : r < 0.75 ? 2 : 3];
+      if (!fed[c]) {
+        p.moveTo(x1, y1);
+        p.lineTo(ex, ey);
+        continue;
+      }
+      // one curve from the middle of every inflowing stretch, bending through this cell
+      for (let k = 0; k < 8; k++) {
+        const ux = (c % W) + (k === 0 || k === 3 || k === 5 ? -1 : k === 2 || k === 4 || k === 7 ? 1 : 0);
+        const uy = Math.floor(c / W) + (k < 3 ? -1 : k > 4 ? 1 : 0);
+        if (uy < 0 || uy >= H) continue;
+        const u = uy * W + ((ux + W) % W);
+        if (w.down[u] !== c || w.river[u] <= 0) continue;
+        const ux1 = near(px(u), x1);
+        p.moveTo((ux1 + x1) / 2, (py(u) + y1) / 2);
+        p.quadraticCurveTo(x1, y1, ex, ey);
+      }
+    }
+    this.rivers = classes.map((width, i) => ({ width, path: paths[i] }));
+    this.lakes = this.lakeOutline();
+  }
+
+  /** Lake shores, traced round the lake cells with marching squares so neighbouring cells merge into one sheet of water. */
+  private lakeOutline(): Path2D {
+    const w = this.sim.world;
+    const path = new Path2D();
+    // a lone lake cell still makes a pond most of a cell across
+    const edge = 0.68;
+    const inside = (x: number, y: number) => y >= 0 && y < H && w.lake[y * W + ((x + W) % W)] === 1;
+    for (let y = -1; y < H; y++) {
+      for (let x = -1; x < W; x++) {
+        const corners: [number, number][] = [[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]];
+        const ins = corners.map(([cx, cy]) => inside(cx, cy));
+        if (!ins.some(Boolean)) continue;
+        const pts: [number, number][] = [];
+        for (let i = 0; i < 4; i++) {
+          const [ax, ay] = corners[i];
+          const [bx, by] = corners[(i + 1) % 4];
+          if (ins[i]) pts.push([ax, ay]);
+          if (ins[i] !== ins[(i + 1) % 4]) {
+            const t = ins[i] ? edge : 1 - edge;
+            pts.push([ax + (bx - ax) * t, ay + (by - ay) * t]);
+          }
+        }
+        path.moveTo(pts[0][0] + 0.5, pts[0][1] + 0.5);
+        for (let i = 1; i < pts.length; i++) path.lineTo(pts[i][0] + 0.5, pts[i][1] + 0.5);
+        path.closePath();
+      }
+    }
+    return path;
+  }
+
+  private drawWater(ctx: CanvasRenderingContext2D, k: number, ky: number, x0: number, y0: number, dpr: number): void {
+    this.buildWater();
+    ctx.save();
+    ctx.setTransform(k, 0, 0, ky, -x0 * k, -y0 * ky);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    // thin at world scale, broadening as you come closer, never thinner than a hairline
+    const grow = Math.min(1, 0.35 + this.zoom / 10);
+    ctx.strokeStyle = 'rgba(214, 226, 196, 0.35)';
+    for (const r of this.rivers) {
+      ctx.lineWidth = Math.max(r.width * grow, (1.1 * dpr) / k) + (1.6 * dpr) / k;
+      ctx.stroke(r.path);
+    }
+    ctx.strokeStyle = 'rgb(62, 134, 168)';
+    for (const r of this.rivers) {
+      ctx.lineWidth = Math.max(r.width * grow, (1.1 * dpr) / k);
+      ctx.stroke(r.path);
+    }
+    ctx.fillStyle = 'rgb(58, 128, 160)';
+    ctx.shadowColor = 'rgba(214, 226, 196, 0.7)';
+    ctx.shadowBlur = 3 * dpr;
+    ctx.fill(this.lakes);
+    // round off the corners of the traced shore
+    ctx.strokeStyle = 'rgb(58, 128, 160)';
+    ctx.lineWidth = 0.3;
+    ctx.stroke(this.lakes);
+    ctx.restore();
   }
 
   /** Volcanoes stay on the map as landmarks, smoking for a while after they erupt. */

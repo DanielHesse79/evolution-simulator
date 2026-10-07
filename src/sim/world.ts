@@ -27,7 +27,7 @@ export interface Atmosphere {
   ch4: number; // ppm
   so2: number; // aerosol index 0..100
   dust: number; // impact / ash veil, decays quickly
-  sun: number; // divine temperature offset, °C
+  sun: number; // the player's temperature offset, °C
   seaLevel: number; // elevation units
 }
 
@@ -82,7 +82,7 @@ export class World {
   orbitalForcing = 0;
   get seaLevel(): number { return this.atm.seaLevel + this.iceSeaLevel; }
 
-  // divine / event modifications, slowly fading
+  // the player's and events' modifications, slowly fading
   readonly moistMod = new Float32Array(N);
   readonly mineralMod = new Float32Array(N);
   readonly phMod = new Float32Array(N);
@@ -107,6 +107,22 @@ export class World {
   readonly canopy = new Float32Array(N);
   readonly cover = new Float32Array(N);
   readonly plankton = new Float32Array(N);
+
+  // fresh water: rain gathers downhill into rivers and fills basins into lakes
+  /** Rainfall on land before rivers and lakes water their banks, 0..1. */
+  readonly rain = new Float32Array(N);
+  /** Where a land cell drains to: the next cell downstream (a sea cell at a river mouth), or -1 at the polar edge. */
+  readonly down = new Int32Array(N).fill(-1);
+  /** Water passing through a land cell, in cells' worth of runoff. */
+  readonly flow = new Float32Array(N);
+  /** 0..1: how big a river runs through the cell (0 = none). */
+  readonly river = new Float32Array(N);
+  readonly lake = new Uint8Array(N);
+  /** 0..1: fresh water to drink, 1 at a river or lake and fading over a few cells. */
+  readonly drink = new Float32Array(N);
+  hydroVersion = 0;
+  private drainOrder = new Int32Array(0);
+  private basinDepth = new Float32Array(N);
 
   // disturbance
   readonly burning = new Uint8Array(N);
@@ -176,6 +192,8 @@ export class World {
     this.crustRadiation = this.rockRadiation.slice();
     this.vent.set(this.tectonics.activity);
     this.updateGeography();
+    this.updateClimate();
+    // once more, so the first rivers water their banks from the start
     this.updateClimate();
   }
 
@@ -312,6 +330,7 @@ export class World {
       if (ang < 0) ang += Math.PI * 2;
       return { id: i, name: names[i], size: f.cells, cx: (ang / (Math.PI * 2)) * W, cy: f.sy / f.cells };
     });
+    this.drainage();
     this.geoVersion++;
   }
 
@@ -334,7 +353,7 @@ export class World {
     let ice = 0;
     let area = 0;
     for (let c = 0; c < N; c++) {
-      // the fading of divine touch-ups
+      // the fading of the player's touch-ups
       moistMod[c] *= 0.996;
       mineralMod[c] *= 0.998;
       phMod[c] *= 0.996;
@@ -367,6 +386,9 @@ export class World {
         let m = 0.5 + 0.3 * Math.cos(al * Math.PI * 3.2) + baseMoist[c] * 0.28;
         m += -0.012 * Math.min(distCoast[c], 14) + off * 0.006 + moistMod[c];
         m = clamp(m, 0, 1);
+        this.rain[c] = m;
+        // river banks and lake shores stay green when the land around them is dry
+        m = clamp(m + (this.lake[c] ? 0.3 : 0.1 * this.drink[c] + 0.2 * this.river[c]), 0, 1);
         moist[c] = m;
         p = basePh[c] + (0.5 - m) * 1.6 - acidRain + phMod[c];
         cls[c] = distCoast[c] <= 1 || m > 0.62 ? CLS_WET : CLS_DRY;
@@ -391,6 +413,119 @@ export class World {
     }
     this.meanTemp = sumT / area;
     this.iceFrac = ice / area;
+    this.hydrology();
+  }
+
+  /**
+   * Which way every land cell drains. Basins are filled up to their outlet first (priority flood),
+   * so water always finds the sea; how deep a basin is filled says where a lake can form.
+   */
+  private drainage(): void {
+    const { elev, isWater, down, basinDepth } = this;
+    const filled = new Float32Array(N);
+    const done = new Uint8Array(N);
+    const order: number[] = [];
+    // a binary min-heap of cells keyed on their filled height
+    const heap: number[] = [];
+    const key = (i: number) => filled[heap[i]];
+    const push = (c: number) => {
+      heap.push(c);
+      let i = heap.length - 1;
+      while (i > 0) {
+        const p = (i - 1) >> 1;
+        if (key(p) <= key(i)) break;
+        [heap[p], heap[i]] = [heap[i], heap[p]];
+        i = p;
+      }
+    };
+    const pop = () => {
+      const top = heap[0];
+      const last = heap.pop()!;
+      if (heap.length) {
+        heap[0] = last;
+        let i = 0;
+        for (;;) {
+          const l = 2 * i + 1, r = l + 1;
+          let m = i;
+          if (l < heap.length && key(l) < key(m)) m = l;
+          if (r < heap.length && key(r) < key(m)) m = r;
+          if (m === i) break;
+          [heap[m], heap[i]] = [heap[i], heap[m]];
+          i = m;
+        }
+      }
+      return top;
+    };
+    down.fill(-1);
+    basinDepth.fill(0);
+    for (let c = 0; c < N; c++) {
+      const y = Math.floor(c / W);
+      // rivers start from the sea and from the polar edges of the map
+      if (isWater[c] || y === 0 || y === H - 1) {
+        filled[c] = isWater[c] ? this.seaLevel : elev[c];
+        done[c] = 1;
+        if (!isWater[c]) order.push(c);
+        push(c);
+      }
+    }
+    while (heap.length) {
+      const c = pop();
+      const x = c % W, y = Math.floor(c / W);
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= H) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          const n = ny * W + ((x + dx + W) % W);
+          if (done[n]) continue;
+          done[n] = 1;
+          filled[n] = Math.max(elev[n], filled[c] + 1e-5);
+          basinDepth[n] = filled[n] - elev[n];
+          down[n] = c;
+          order.push(n);
+          push(n);
+        }
+      }
+    }
+    // upstream first
+    this.drainOrder = Int32Array.from(order.reverse());
+  }
+
+  /** Gather the rain into rivers and lakes, and work out how far every cell is from fresh water. */
+  private hydrology(): void {
+    const { rain, down, flow, river, lake, drink, temp, basinDepth, drainOrder, isWater, nb } = this;
+    flow.fill(0);
+    for (const c of drainOrder) {
+      // frozen ground holds its water as ice; dry, hot land drinks up what flows across it
+      const runoff = temp[c] < -6 ? 0 : Math.max(0, rain[c] - 0.3) * 2;
+      const f = (flow[c] + runoff) * (1 - 0.04 * Math.max(0, 0.5 - rain[c]) * (temp[c] > 20 ? 1.5 : 1));
+      flow[c] = f;
+      if (down[c] >= 0 && !isWater[down[c]]) flow[down[c]] += f;
+    }
+    let changed = false;
+    const queue: number[] = [];
+    for (let c = 0; c < N; c++) {
+      const was = river[c] > 0 || lake[c] > 0;
+      river[c] = isWater[c] || flow[c] < 4 ? 0 : Math.min(1, 0.15 + (flow[c] - 4) / 40);
+      lake[c] = !isWater[c] && basinDepth[c] > 0.006 && flow[c] > 2.5 && temp[c] > -6 ? 1 : 0;
+      if (was !== (river[c] > 0 || lake[c] > 0)) changed = true;
+      drink[c] = river[c] > 0 || lake[c] ? 1 : 0;
+      if (drink[c]) queue.push(c);
+    }
+    // fresh water within a short walk
+    for (let qh = 0; qh < queue.length; qh++) {
+      const c = queue[qh];
+      const next = drink[c] - 0.25;
+      if (next <= 0) continue;
+      for (let k = 0; k < 4; k++) {
+        const n = nb[c * 4 + k];
+        if (n >= 0 && !isWater[n] && drink[n] < next) {
+          drink[n] = next;
+          queue.push(n);
+        }
+      }
+    }
+    if (changed) this.hydroVersion++;
   }
 
   advanceGeology(start: number, end: number): { dx: number; dy: number }[] {
@@ -439,7 +574,9 @@ export class World {
     const cov = this.cover[c];
     const high = this.elev[c] - this.seaLevel > 0.6;
     if (t < -8) return 'Ice sheet';
+    if (this.lake[c]) return 'Lake';
     if (this.char[c] > 0.5) return 'Burnt land';
+    if (this.river[c] > 0 && this.rain[c] < 0.4) return 'River oasis';
     if (can > 0.55) {
       if (t > 20) return m > 0.68 ? 'Rainforest' : 'Tropical forest';
       if (t > 6) return 'Temperate forest';
